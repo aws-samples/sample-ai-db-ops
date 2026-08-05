@@ -1,0 +1,20 @@
+template_id: my_detect_blocking_chains
+engine: mysql
+tool_function_name: detect_blocking_chains
+tier: 1
+description: InnoDB blocking chains derived from innodb_lock_waits and innodb_trx.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT r.trx_id AS blocked_trx, r.trx_mysql_thread_id AS blocked_pid,
+         LEFT(r.trx_query, 150) AS blocked_query,
+         b.trx_id AS blocking_trx, b.trx_mysql_thread_id AS blocking_pid,
+         LEFT(b.trx_query, 150) AS blocking_query,
+         TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS wait_seconds
+  FROM information_schema.innodb_lock_waits w
+  JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
+  JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
+  ORDER BY wait_seconds DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

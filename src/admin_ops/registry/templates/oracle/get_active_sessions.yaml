@@ -1,0 +1,17 @@
+template_id: ora_get_active_sessions
+engine: oracle
+tool_function_name: get_active_sessions
+tier: 1
+description: Active user sessions from v$session.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT sid, serial#, username, status, machine, program,
+         sql_id, event, wait_class,
+         ROUND(last_call_et/60, 1) AS minutes_active
+  FROM v$session
+  WHERE type = 'USER' AND status = 'ACTIVE' AND username IS NOT NULL
+  ORDER BY last_call_et DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

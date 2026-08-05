@@ -1,0 +1,24 @@
+template_id: pg_get_slow_queries
+engine: postgresql
+tool_function_name: get_slow_queries
+tier: 1
+description: Top N slowest queries from pg_stat_statements with mean execution time.
+owner: dbops-platform
+parameters:
+  - name: top_n
+    type: int
+    default: 10
+    min: 1
+    max: 100
+body: |
+  SELECT queryid, LEFT(query, 300) as query_text, calls,
+         round((total_exec_time / 1000)::numeric, 2) as total_time_sec,
+         round((mean_exec_time / 1000)::numeric, 3) as avg_time_sec,
+         rows
+  FROM pg_stat_statements
+  WHERE userid != 10
+  ORDER BY mean_exec_time DESC
+  LIMIT %(top_n)s;
+version: 2
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

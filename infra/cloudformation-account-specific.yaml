@@ -1,0 +1,355 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Agentic DB Ops — Infrastructure for account 123456789012 (us-east-1).
+  Adds DynamoDB tables and VPC endpoints needed by AgentCore-hosted agents.
+  Database secrets (Oracle, Aurora PG, Aurora MySQL) are managed outside this
+  stack since they are reused across environments and contain rotating
+  credentials.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dbops
+    Description: Environment name prefix for all resources
+
+  ExistingVpcId:
+    Type: String
+    Default: vpc-0xxxxxxxxxxxxxxxx
+    Description: Database-VPC — Oracle, Aurora PG (database-test), Aurora MySQL all live here
+
+  ExistingVpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+
+  PrivateSubnet1:
+    Type: String
+    Default: subnet-0xxxxxxxxxxxxxxxx
+    Description: Database Private Subnet 1 (us-east-1d, 10.0.5.0/24)
+
+  PrivateSubnet2:
+    Type: String
+    Default: subnet-0bbbbbbbbbbbbbbbb
+    Description: Database Private Subnet 2 (us-east-1e, 10.0.6.0/24)
+
+Resources:
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # KMS CMK (used for DynamoDB encryption)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  DbOpsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "CMK for ${EnvironmentName} DB Ops encryption (DynamoDB, Secrets Manager)"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:PutKeyPolicy
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            # In a KMS key policy, "*" means only the key to which this
+            # policy is attached; key policies require this resource value.
+            Resource: "*"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # VPC Endpoints (for AgentCore agents to reach AWS services without internet)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTPS from VPC for VPC endpoints
+      VpcId: !Ref ExistingVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref ExistingVpcCidr
+          Description: HTTPS from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpce-sg
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  BedrockEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.bedrock-runtime
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  STSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sts
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  CloudWatchMonitoringEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.monitoring
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  RDSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref ExistingVpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.rds
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DynamoDB Tables (Admins, DB Registry, Gamification, Leaderboard, Orders demo)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # Admin_Role store (R6): one item per admin user_id. Non-key attributes
+  # (granted_by, granted_at, note) are written by the admin middleware at
+  # runtime; DynamoDB is schemaless so only the partition key is declared here.
+  AdminsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-admins
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-admins
+
+  DBRegistryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-registry
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: db_identifier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: db_identifier
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-registry
+
+  GamificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-gamification
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gamification
+
+  LeaderboardTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-leaderboard
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-leaderboard
+
+  DynamoDBOrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: order_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: gsi-customer-date
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: order_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-orders
+
+Outputs:
+  VPCEndpointSecurityGroupId:
+    Description: Security group for VPC endpoints
+    Value: !Ref VPCEndpointSecurityGroup
+
+  AgentSubnets:
+    Description: Subnet IDs for AgentCore VPC mode deployment
+    Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+
+  AgentSecurityGroups:
+    Description: >-
+      Existing DB security groups for AgentCore agents (Oracle + Aurora MySQL).
+      Override these from the AWS console or environment if your account uses
+      different SG IDs.
+    Value: !Sub
+      - "${SG1},${SG2}"
+      - SG1: sg-0xxxxxxxxxxxxxxxx
+        SG2: sg-0yyyyyyyyyyyyyyyy
+
+  DBRegistryTableName:
+    Description: Database registry DynamoDB table
+    Value: !Ref DBRegistryTable
+
+  AdminsTableName:
+    Description: Admin role DynamoDB table (R6 — admin-ops-console)
+    Value: !Ref AdminsTable
+
+  GamificationTableName:
+    Description: Gamification DynamoDB table
+    Value: !Ref GamificationTable
+
+  DynamoDBOrdersTableName:
+    Description: DynamoDB orders table name
+    Value: !Ref DynamoDBOrdersTable

@@ -1,0 +1,22 @@
+template_id: ora_get_blocking_sessions
+engine: oracle
+tool_function_name: get_blocking_sessions
+tier: 1
+description: Blocking-session chains from v$session joined with v$sql.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT s1.sid AS blocked_sid, s1.username AS blocked_user,
+         SUBSTR(sq1.sql_text, 1, 150) AS blocked_sql,
+         s2.sid AS blocking_sid, s2.username AS blocking_user,
+         SUBSTR(sq2.sql_text, 1, 150) AS blocking_sql,
+         ROUND(s1.seconds_in_wait) AS wait_seconds
+  FROM v$session s1
+  JOIN v$session s2 ON s1.blocking_session = s2.sid
+  LEFT JOIN v$sql sq1 ON s1.sql_id = sq1.sql_id AND ROWNUM = 1
+  LEFT JOIN v$sql sq2 ON s2.sql_id = sq2.sql_id AND ROWNUM = 1
+  WHERE s1.blocking_session IS NOT NULL
+  ORDER BY s1.seconds_in_wait DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

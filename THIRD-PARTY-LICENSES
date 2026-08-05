@@ -1,0 +1,87 @@
+THIRD-PARTY LICENSES
+====================
+
+This sample depends on the third-party open source packages listed below.
+Each package remains the property of its respective copyright holders and is
+distributed under its own license. This file is provided for attribution; it
+does not modify the terms of the individual licenses. Refer to each project's
+repository for the full license text and copyright notices.
+
+The sample code itself is licensed under the Apache License 2.0 (see the
+LICENSE file).
+
+--------------------------------------------------------------------------
+Python dependencies (requirements.txt)
+--------------------------------------------------------------------------
+
+| Package                | Version | License                     | Project                                             |
+|------------------------|---------|-----------------------------|-----------------------------------------------------|
+| aiohttp                | 3.14.1  | Apache-2.0                  | https://github.com/aio-libs/aiohttp                 |
+| bedrock-agentcore      | 1.18.0  | Apache-2.0                  | https://github.com/aws/bedrock-agentcore-sdk-python |
+| boto3                  | 1.43.49 | Apache-2.0                  | https://github.com/boto/boto3                       |
+| mcp                    | 1.28.1  | MIT                         | https://github.com/modelcontextprotocol/python-sdk  |
+| oracledb               | 4.0.2   | Apache-2.0 OR UPL-1.0       | https://github.com/oracle/python-oracledb           |
+| psycopg2-binary        | 2.9.12  | LGPL-3.0 with exceptions    | https://github.com/psycopg/psycopg2                 |
+| pydantic               | 2.13.4  | MIT                         | https://github.com/pydantic/pydantic                |
+| pydantic-settings      | 2.14.2  | MIT                         | https://github.com/pydantic/pydantic-settings       |
+| pymysql                | 1.2.0   | MIT                         | https://github.com/PyMySQL/PyMySQL                  |
+| python-multipart       | 0.0.32  | Apache-2.0                  | https://github.com/Kludex/python-multipart           |
+| strands-agents         | 1.47.0  | Apache-2.0                  | https://github.com/strands-agents/sdk-python        |
+| strands-agents-tools   | 0.8.3   | Apache-2.0                  | https://github.com/strands-agents/tools             |
+
+--------------------------------------------------------------------------
+UI dependencies (ui/package.json)
+--------------------------------------------------------------------------
+
+| Package                                   | License    | Project                                          |
+|-------------------------------------------|------------|--------------------------------------------------|
+| @aws-sdk/client-bedrock-agent-runtime     | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3             |
+| @aws-sdk/client-s3                        | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3             |
+| @aws-sdk/s3-request-presigner             | Apache-2.0 | https://github.com/aws/aws-sdk-js-v3             |
+| @codemirror/lang-json                     | MIT        | https://github.com/codemirror/lang-json          |
+| @codemirror/lang-sql                      | MIT        | https://github.com/codemirror/lang-sql           |
+| @codemirror/state                         | MIT        | https://github.com/codemirror/state              |
+| @codemirror/view                          | MIT        | https://github.com/codemirror/view               |
+| @dnd-kit/core                             | MIT        | https://github.com/clauderic/dnd-kit             |
+| @dnd-kit/sortable                         | MIT        | https://github.com/clauderic/dnd-kit             |
+| @dnd-kit/utilities                        | MIT        | https://github.com/clauderic/dnd-kit             |
+| @types/node                               | MIT        | https://github.com/DefinitelyTyped/DefinitelyTyped |
+| @types/react                              | MIT        | https://github.com/DefinitelyTyped/DefinitelyTyped |
+| @uiw/react-codemirror                     | MIT        | https://github.com/uiwjs/react-codemirror        |
+| @xyflow/react                             | MIT        | https://github.com/xyflow/xyflow                 |
+| autoprefixer                              | MIT        | https://github.com/postcss/autoprefixer          |
+| next                                      | MIT        | https://github.com/vercel/next.js                |
+| postcss                                   | MIT        | https://github.com/postcss/postcss               |
+| react                                     | MIT        | https://github.com/facebook/react               |
+| react-dom                                 | MIT        | https://github.com/facebook/react               |
+| swr                                       | MIT        | https://github.com/vercel/swr                    |
+| tailwindcss                               | MIT        | https://github.com/tailwindlabs/tailwindcss      |
+| typescript                                | Apache-2.0 | https://github.com/microsoft/TypeScript          |
+
+--------------------------------------------------------------------------
+Notes
+--------------------------------------------------------------------------
+
+- The project is distributed under Apache-2.0; each dependency remains
+  governed by its own license as listed above.
+- Python direct dependencies and explicit security constraints are exact-pinned
+  in six requirements.in files. Their complete transitive graphs are resolved
+  and hash-locked in the corresponding requirements.txt files for Python 3.12
+  on Linux ARM64.
+- UI dependencies, including resolved transitive versions and license metadata,
+  are locked in ui/package-lock.json. Consult the lockfiles and each package's
+  distribution metadata for authoritative notices and license text.
+- psycopg2-binary is distributed under the GNU Lesser General Public License
+  with the Psycopg linking exception; consult its distribution for the exact
+  exception terms.
+
+  What the exception means for this project: psycopg2 is used only as an
+  unmodified, dynamically imported library. The linking exception explicitly
+  permits linking with works under other licenses, so distributing this
+  Apache-2.0 sample alongside a dependency declaration for psycopg2-binary does
+  not place LGPL obligations on the sample's own source. Those obligations would
+  attach only if psycopg2 itself were modified and redistributed, or statically
+  combined into a derived work. If your organization prohibits LGPL dependencies
+  outright, substitute a PostgreSQL driver under a permissive license (for
+  example `pg8000`, BSD-3-Clause) and update the connection helper in
+  `src/admin_ops/db/tls.py` and `src/connections/manager.py` accordingly.

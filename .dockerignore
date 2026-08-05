@@ -1,0 +1,17 @@
+# Keep the image lean and the build reproducible.
+.git
+.venv
+**/.venv
+**/node_modules
+ui/.next
+ui/out
+**/__pycache__
+**/*.pyc
+.hypothesis
+.pytest_cache
+.secrets
+tests/sample_health_report.*
+*.log
+build.log
+.DS_Store
+deploy/**/.bedrock_agentcore

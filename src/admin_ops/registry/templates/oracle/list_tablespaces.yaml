@@ -1,0 +1,20 @@
+template_id: ora_list_tablespaces
+engine: oracle
+tool_function_name: list_tablespaces
+tier: 1
+description: Tablespace usage with total, used, and free space sizes.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT df.tablespace_name,
+         ROUND(df.total_mb, 1) AS total_mb,
+         ROUND(df.total_mb - NVL(fs.free_mb, 0), 1) AS used_mb,
+         ROUND(NVL(fs.free_mb, 0), 1) AS free_mb,
+         ROUND((df.total_mb - NVL(fs.free_mb, 0)) / df.total_mb * 100, 1) AS pct_used
+  FROM (SELECT tablespace_name, SUM(bytes)/1024/1024 AS total_mb FROM dba_data_files GROUP BY tablespace_name) df
+  LEFT JOIN (SELECT tablespace_name, SUM(bytes)/1024/1024 AS free_mb FROM dba_free_space GROUP BY tablespace_name) fs
+  ON df.tablespace_name = fs.tablespace_name
+  ORDER BY pct_used DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

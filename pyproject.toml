@@ -1,0 +1,57 @@
+# Dependency versions here are exact pins, not ranges.
+#
+# An open range (">=") lets a fresh install silently pick up a release that was
+# never tested against this code, and in the worst case a compromised one. The
+# authoritative, fully hash-locked graphs live in requirements.txt (development)
+# and deploy/*/requirements.txt (one per agent runtime, compiled for Python 3.12
+# on linux/arm64). The pins below are the direct dependencies and must be kept in
+# step with those locks; recompile a lock with:
+#
+#   uv pip compile --python-version 3.12 \
+#       --python-platform aarch64-unknown-linux-gnu --generate-hashes \
+#       requirements.in -o requirements.txt
+[project]
+name = "agentic-db-ops"
+version = "0.1.0"
+description = "Gamified AI-powered database operations agent using Strands Agent Framework on Amazon Bedrock AgentCore Runtime"
+requires-python = ">=3.11"
+dependencies = [
+    "strands-agents==1.47.0",
+    "strands-agents-tools==0.8.3",
+    "boto3==1.43.49",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    # Pinned to close known advisories in the transitive graph; see requirements.in.
+    "aiohttp==3.14.1",
+    "python-multipart==0.0.32",
+    "mcp==1.28.1",
+]
+
+# Engine drivers are optional so a deployment installs only the ones it needs.
+# Each agent runtime pins the same versions in deploy/<engine>_agent/requirements.in.
+[project.optional-dependencies]
+postgresql = ["psycopg2-binary==2.9.12"]
+mysql = ["pymysql==1.2.0"]
+oracle = ["oracledb==4.0.2"]
+elasticache = ["redis==8.1.0"]
+dev = [
+    "pytest==9.0.3",
+    "hypothesis==6.155.0",
+    "pyyaml==6.0.3",
+    "markdown==3.10.2",
+    "ruff==0.16.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

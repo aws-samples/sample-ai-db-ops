@@ -1,0 +1,940 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Agentic DB Ops — Infrastructure Stack (Private, No Public Endpoints)
+  Creates Aurora PostgreSQL, Aurora MySQL, DynamoDB tables, Secrets Manager,
+  VPC with private subnets, NAT Gateway, and VPC endpoints for AWS services.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dbops-demo
+    Description: Environment name prefix for all resources
+
+  DBMasterUsername:
+    Type: String
+    Default: dbops_admin
+    Description: Master username for Aurora clusters
+    MinLength: 4
+
+  DBMasterPassword:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Master password for Aurora clusters (min 8 chars). Provide a strong
+      password at deploy time, or source it from AWS Secrets Manager. No
+      default is set so a value must be supplied explicitly.
+    MinLength: 8
+
+Resources:
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # KMS CMK (used for DynamoDB + Secrets Manager encryption)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  DbOpsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "CMK for ${EnvironmentName} DB Ops encryption (DynamoDB, Secrets Manager)"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:PutKeyPolicy
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            # In a KMS key policy, "*" means only the key to which this
+            # policy is attached; key policies require this resource value.
+            Resource: "*"
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # IAM role for RDS Enhanced Monitoring (CKV_AWS_118)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Allows RDS to publish enhanced monitoring metrics to CloudWatch Logs
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # VPC & Networking (Private architecture)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc
+
+  # Private subnets (databases + AgentCore agents live here)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-2
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-private-rt
+
+  PrivateSubnet1RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # VPC Endpoints (so agents can reach AWS services without internet)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTPS from VPC for VPC endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 10.0.0.0/16
+          Description: HTTPS from VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpce-sg
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  DynamoDBEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  BedrockEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.bedrock-runtime
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  STSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sts
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  CloudWatchMonitoringEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.monitoring
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  RDSEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.rds
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  AutoScalingEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.application-autoscaling
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Security Groups
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # Agent/app-tier security group. Attach this to the AgentCore agents (or any
+  # app tier). The database security group below only accepts traffic sourced
+  # from this SG — no database port is ever opened to an IP CIDR range.
+  AgentSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Agent/app tier that connects to the databases
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-agent-sg
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Database access - ingress limited to the agent SG only
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-db-sg
+
+  # Ingress is declared as standalone rules sourced from the agent security
+  # group (SourceSecurityGroupId) rather than a CIDR block, so no DB port is
+  # exposed to an IP range (least privilege).
+  DatabaseIngressPostgres:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref AgentSecurityGroup
+      Description: PostgreSQL from the agent security group
+
+  DatabaseIngressMySQL:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref AgentSecurityGroup
+      Description: MySQL from the agent security group
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Aurora PostgreSQL (PRIVATE — no public access)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  AuroraPostgresSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnet group for Aurora PostgreSQL
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-pg-subnet
+
+  AuroraPostgresCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${EnvironmentName}-aurora-pg
+      Engine: aurora-postgresql
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DatabaseName: appdb
+      DBSubnetGroupName: !Ref AuroraPostgresSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      EnableIAMDatabaseAuthentication: true
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-pg
+        - Key: Environment
+          Value: demo
+
+  AuroraPostgresInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-aurora-pg-1
+      DBClusterIdentifier: !Ref AuroraPostgresCluster
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-pg-1
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Aurora MySQL (PRIVATE — no public access)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  AuroraMySQLSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnet group for Aurora MySQL
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-mysql-subnet
+
+  AuroraMySQLCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${EnvironmentName}-aurora-mysql
+      Engine: aurora-mysql
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DatabaseName: appdb
+      DBSubnetGroupName: !Ref AuroraMySQLSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      EnableIAMDatabaseAuthentication: true
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-mysql
+        - Key: Environment
+          Value: demo
+
+  AuroraMySQLInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-aurora-mysql-1
+      DBClusterIdentifier: !Ref AuroraMySQLCluster
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-mysql
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-aurora-mysql-1
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Standalone RDS PostgreSQL (PRIVATE — no public access)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnet group for standalone RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  RDSPostgres:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-rds-postgres
+      Engine: postgres
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      EnableIAMDatabaseAuthentication: true
+      DBName: appdb
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: true
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-rds-postgres
+        - Key: Environment
+          Value: demo
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Standalone RDS MySQL (PRIVATE — no public access)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  RDSMySQL:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-rds-mysql
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      EnableIAMDatabaseAuthentication: true
+      DBName: appdb
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      PubliclyAccessible: false
+      MultiAZ: true
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-rds-mysql
+        - Key: Environment
+          Value: demo
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Secrets — Standalone RDS Credentials
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  RDSPostgresSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Standalone RDS PostgreSQL credentials
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${RDSPostgres.Endpoint.Address}",
+          "port": 5432,
+          "dbname": "appdb",
+          "engine": "postgres"
+        }
+
+  RDSMySQLSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Standalone RDS MySQL credentials
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${RDSMySQL.Endpoint.Address}",
+          "port": 3306,
+          "dbname": "appdb",
+          "engine": "mysql"
+        }
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Lower Environment — Target DBs for Replication & Data Masking
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # Aurora PostgreSQL (Dev/Staging target)
+  LowerEnvPostgresCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${EnvironmentName}-dev-pg
+      Engine: aurora-postgresql
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DatabaseName: appdb
+      DBSubnetGroupName: !Ref AuroraPostgresSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      EnableIAMDatabaseAuthentication: true
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dev-pg
+        - Key: Environment
+          Value: development
+
+  LowerEnvPostgresInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-dev-pg-1
+      DBClusterIdentifier: !Ref LowerEnvPostgresCluster
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-postgresql
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dev-pg-1
+        - Key: Environment
+          Value: development
+
+  # Aurora MySQL (Dev/Staging target)
+  LowerEnvMySQLCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      DBClusterIdentifier: !Sub ${EnvironmentName}-dev-mysql
+      Engine: aurora-mysql
+      MasterUsername: !Ref DBMasterUsername
+      MasterUserPassword: !Ref DBMasterPassword
+      DatabaseName: appdb
+      DBSubnetGroupName: !Ref AuroraMySQLSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      EnableIAMDatabaseAuthentication: true
+      StorageEncrypted: true
+      DeletionProtection: false
+      BackupRetentionPeriod: 1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dev-mysql
+        - Key: Environment
+          Value: development
+
+  LowerEnvMySQLInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub ${EnvironmentName}-dev-mysql-1
+      DBClusterIdentifier: !Ref LowerEnvMySQLCluster
+      DBInstanceClass: db.t3.medium
+      Engine: aurora-mysql
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dev-mysql-1
+        - Key: Environment
+          Value: development
+
+  # Secrets for lower environment
+  LowerEnvPostgresSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Dev Aurora PostgreSQL credentials (replication target)
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${LowerEnvPostgresCluster.Endpoint.Address}",
+          "port": 5432,
+          "dbname": "appdb",
+          "engine": "aurora-postgresql",
+          "environment": "development"
+        }
+
+  LowerEnvMySQLSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Dev Aurora MySQL credentials (replication target)
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${LowerEnvMySQLCluster.Endpoint.Address}",
+          "port": 3306,
+          "dbname": "appdb",
+          "engine": "aurora-mysql",
+          "environment": "development"
+        }
+
+  # DynamoDB lower env table (replication target)
+  LowerEnvDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: order_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: gsi-customer-date
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: order_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-dev-orders
+        - Key: Environment
+          Value: development
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DynamoDB Tables
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  DynamoDBOrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+        - AttributeName: customer_id
+          AttributeType: S
+        - AttributeName: order_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: gsi-customer-date
+          KeySchema:
+            - AttributeName: customer_id
+              KeyType: HASH
+            - AttributeName: order_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-orders
+        - Key: Environment
+          Value: demo
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Secrets Manager — Database Credentials
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  PostgresSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Aurora PostgreSQL credentials for DB Ops agent
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${AuroraPostgresCluster.Endpoint.Address}",
+          "port": 5432,
+          "dbname": "appdb",
+          "engine": "aurora-postgresql"
+        }
+
+  MySQLSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Aurora MySQL credentials for DB Ops agent
+      KmsKeyId: !Ref DbOpsKmsKey
+      SecretString: !Sub |
+        {
+          "username": "${DBMasterUsername}",
+          "password": "${DBMasterPassword}",
+          "host": "${AuroraMySQLCluster.Endpoint.Address}",
+          "port": 3306,
+          "dbname": "appdb",
+          "engine": "aurora-mysql"
+        }
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # Database Registry & Gamification (DynamoDB)
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  DBRegistryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: db_identifier
+          AttributeType: S
+      KeySchema:
+        - AttributeName: db_identifier
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-registry
+
+  GamificationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-gamification
+
+  LeaderboardTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-leaderboard
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Outputs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+Outputs:
+  VpcId:
+    Description: VPC ID (use for AgentCore VPC mode deployment)
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VpcId
+
+  PrivateSubnetIds:
+    Description: Private subnet IDs (for AgentCore VPC mode and databases)
+    Value: !Join [',', [!Ref PrivateSubnet1, !Ref PrivateSubnet2]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PrivateSubnetIds
+
+  DatabaseSecurityGroupId:
+    Description: Security group attached to the databases (ingress only from the agent SG)
+    Value: !Ref DatabaseSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-DBSecurityGroupId
+
+  AgentSecurityGroupId:
+    Description: Attach this security group to AgentCore agents / app tier so they can reach the databases
+    Value: !Ref AgentSecurityGroup
+    Export:
+      Name: !Sub ${EnvironmentName}-AgentSecurityGroupId
+
+  AuroraPostgresEndpoint:
+    Description: Aurora PostgreSQL cluster endpoint (private)
+    Value: !GetAtt AuroraPostgresCluster.Endpoint.Address
+
+  AuroraPostgresPort:
+    Description: Aurora PostgreSQL port
+    Value: !GetAtt AuroraPostgresCluster.Endpoint.Port
+
+  AuroraMySQLEndpoint:
+    Description: Aurora MySQL cluster endpoint (private)
+    Value: !GetAtt AuroraMySQLCluster.Endpoint.Address
+
+  AuroraMySQLPort:
+    Description: Aurora MySQL port
+    Value: !GetAtt AuroraMySQLCluster.Endpoint.Port
+
+  PostgresSecretArn:
+    Description: Secrets Manager ARN for PostgreSQL credentials
+    Value: !Ref PostgresSecret
+
+  MySQLSecretArn:
+    Description: Secrets Manager ARN for MySQL credentials
+    Value: !Ref MySQLSecret
+
+  DynamoDBOrdersTableName:
+    Description: DynamoDB orders table name
+    Value: !Ref DynamoDBOrdersTable
+
+  DBRegistryTableName:
+    Description: Database registry DynamoDB table
+    Value: !Ref DBRegistryTable
+
+  GamificationTableName:
+    Description: Gamification DynamoDB table
+    Value: !Ref GamificationTable
+
+  RDSPostgresEndpoint:
+    Description: Standalone RDS PostgreSQL endpoint (private)
+    Value: !GetAtt RDSPostgres.Endpoint.Address
+
+  RDSPostgresPort:
+    Description: Standalone RDS PostgreSQL port
+    Value: !GetAtt RDSPostgres.Endpoint.Port
+
+  RDSMySQLEndpoint:
+    Description: Standalone RDS MySQL endpoint (private)
+    Value: !GetAtt RDSMySQL.Endpoint.Address
+
+  RDSMySQLPort:
+    Description: Standalone RDS MySQL port
+    Value: !GetAtt RDSMySQL.Endpoint.Port
+
+  RDSPostgresSecretArn:
+    Description: Secrets Manager ARN for standalone RDS PostgreSQL
+    Value: !Ref RDSPostgresSecret
+
+  RDSMySQLSecretArn:
+    Description: Secrets Manager ARN for standalone RDS MySQL
+    Value: !Ref RDSMySQLSecret
+
+  # Lower Environment Outputs
+  LowerEnvPostgresEndpoint:
+    Description: Dev Aurora PostgreSQL endpoint (replication target)
+    Value: !GetAtt LowerEnvPostgresCluster.Endpoint.Address
+
+  LowerEnvMySQLEndpoint:
+    Description: Dev Aurora MySQL endpoint (replication target)
+    Value: !GetAtt LowerEnvMySQLCluster.Endpoint.Address
+
+  LowerEnvPostgresSecretArn:
+    Description: Secrets Manager ARN for dev PostgreSQL
+    Value: !Ref LowerEnvPostgresSecret
+
+  LowerEnvMySQLSecretArn:
+    Description: Secrets Manager ARN for dev MySQL
+    Value: !Ref LowerEnvMySQLSecret
+
+  LowerEnvDynamoDBTableName:
+    Description: Dev DynamoDB orders table (replication target)
+    Value: !Ref LowerEnvDynamoDBTable

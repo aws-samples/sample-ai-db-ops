@@ -1,0 +1,21 @@
+template_id: pg_get_index_usage
+engine: postgresql
+tool_function_name: get_index_usage
+tier: 1
+description: Index usage counts for a schema, used to identify unused indexes.
+owner: dbops-platform
+parameters:
+  - name: schema_name
+    type: string
+    default: public
+    max: 64
+body: |
+  SELECT schemaname, relname as table_name, indexrelname as index_name,
+         idx_scan as times_used, idx_tup_read, idx_tup_fetch,
+         pg_size_pretty(pg_relation_size(indexrelid)) as index_size
+  FROM pg_stat_user_indexes
+  WHERE schemaname = %(schema_name)s
+  ORDER BY idx_scan ASC, pg_relation_size(indexrelid) DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

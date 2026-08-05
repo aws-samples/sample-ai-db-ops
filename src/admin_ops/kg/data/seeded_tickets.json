@@ -1,0 +1,61 @@
+{
+  "tickets": [
+    {
+      "ticket_id": "CHG-1042",
+      "status": "approved",
+      "title": "Add note column to shop.orders",
+      "created_at": "2024-06-01T09:15:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1043",
+      "status": "open",
+      "title": "Backfill index on shop.order_items",
+      "created_at": "2024-06-03T14:30:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1044",
+      "status": "closed",
+      "title": "Drop deprecated public.users legacy table",
+      "created_at": "2024-05-20T08:00:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1045",
+      "status": "approved",
+      "title": "Rename column status on shop.orders",
+      "created_at": "2024-06-10T11:45:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1046",
+      "status": "open",
+      "title": "Grant read role on orders-db analytics views",
+      "created_at": "2024-06-12T16:20:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1047",
+      "status": "closed",
+      "title": "Create audit trigger on public.users",
+      "created_at": "2024-04-28T07:05:00+00:00",
+      "data_origin": "seeded"
+    },
+    {
+      "ticket_id": "CHG-1048",
+      "status": "approved",
+      "title": "Partition shop.order_items by created month",
+      "created_at": "2024-06-15T13:10:00+00:00",
+      "data_origin": "seeded"
+    }
+  ],
+  "linkage": {
+    "by_event_id": {},
+    "by_resource_pattern": [
+      ["shop\\.orders\\b", "CHG-1042"],
+      ["shop\\.order_items\\b", "CHG-1043"],
+      ["public\\.users\\b", "CHG-1044"]
+    ]
+  }
+}

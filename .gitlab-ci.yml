@@ -1,0 +1,109 @@
+# =====================================================================
+# Task 1.1 required guardrail checks (admin-ops-console spec)
+#
+# These five jobs are the blocking "required checks" introduced by task
+# 1.1 "Repo scaffolding and redaction guardrails". None may carry
+# `allow_failure: true`, and each runs on merge requests and on the
+# default branch:
+#
+#   1. lint:redaction   scripts/check_no_resource_ids.py --all        (P14)
+#   2. lint:semgrep     .semgrep/no-fstring-sql.yml                    (R7.6)
+#   3. redaction property test  tests/admin_ops/redaction/test_no_ids.py
+#   4. execute_with_params unit test  tests/admin_ops/db/test_execute.py
+#   5. require_config unit tests      tests/admin_ops/config/test_require.py (R7.8)
+#
+# Jobs 3-5 are run together by the scoped `test:guardrails` job so the
+# task-1.1 suites stay a clear, self-contained required check. The
+# broader `test:python` job runs the full tests/admin_ops tree as the
+# remaining spec tasks land.
+#
+# Validates: P14, R7.6, R7.8.
+# =====================================================================
+
+stages:
+  - lint
+  - test
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  GIT_DEPTH: "20"
+
+# ----- Redaction guardrail (P14) ---------------------------------------
+lint:redaction:
+  stage: lint
+  image: python:3.12-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends git
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
+  script:
+    - python3 scripts/check_no_resource_ids.py --all
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # Required check: a redaction hit must block the merge (P14).
+  allow_failure: false
+
+# ----- Semgrep static checks (R7.6) ------------------------------------
+# Scope is set by explicit positional target paths (admin-ops-console
+# surface only), NOT by rule-level path globs — positional targets are
+# interpreted identically across every semgrep version, whereas
+# paths.include / paths.exclude globs have drifted between releases and
+# were re-surfacing pre-existing agent findings in CI. Image pinned for
+# the same reproducibility reason.
+lint:semgrep:
+  stage: lint
+  image: semgrep/semgrep:1.164.0
+  script:
+    - semgrep scan --config=.semgrep --error --metrics=off --disable-version-check src/admin_ops scripts tests/admin_ops
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  allow_failure: false
+
+# ----- Task 1.1 guardrail test suites (P14, R7.6, R7.8) ----------------
+# Runs exactly the three pytest suites wired by task 1.1 so they form a
+# clear, scoped required check independent of later-task suites:
+#   - redaction property test       (P14)
+#   - execute_with_params unit test (R7.6)
+#   - require_config unit tests      (R7.8)
+# Deps: pytest + hypothesis (property tests), pyyaml (require_config),
+# pydantic (admin-ops models). psycopg2 is intentionally NOT installed —
+# the db execute test binds through an in-test fake cursor.
+test:guardrails:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends git
+    - git config --global --add safe.directory "${CI_PROJECT_DIR}"
+    # Pinned: an unpinned install would let CI resolve an untested or
+    # compromised release. Keep in step with pyproject.toml [dev].
+    - pip install --quiet pytest==9.0.3 hypothesis==6.155.0 pyyaml==6.0.3 pydantic==2.13.4
+  script:
+    - python -m pytest tests/admin_ops/redaction tests/admin_ops/db tests/admin_ops/config -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  # Required check: the task-1.1 guardrail suites must block the merge.
+  allow_failure: false
+
+# ----- Python unit + property tests (full admin-ops-console tree) ------
+# Broader coverage that grows as later spec tasks land. The task-1.1
+# guardrail suites it includes are additionally enforced, scoped, by
+# `test:guardrails` above. This job also runs the dba-knowledge-graph
+# Hypothesis suites under tests/admin_ops/kg/ (P-KG1..P-KG7, S1..S6),
+# and `lint:redaction --all` above covers the kg source, the DBA View UI
+# (ui/src/app/dba, ui/src/components/dba, ui/src/lib/dba), and the seeded
+# ticket dataset (P-KG6).
+test:python:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends git
+    # Pinned: see the note in the job above.
+    - pip install --quiet pytest==9.0.3 hypothesis==6.155.0 pyyaml==6.0.3 pydantic==2.13.4 markdown==3.10.2
+  script:
+    - python -m pytest tests/admin_ops -q
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  allow_failure: false

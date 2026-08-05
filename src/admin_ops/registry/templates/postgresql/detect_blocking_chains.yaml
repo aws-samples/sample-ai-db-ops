@@ -1,0 +1,30 @@
+template_id: pg_detect_blocking_chains
+engine: postgresql
+tool_function_name: detect_blocking_chains
+tier: 1
+description: Blocking chains showing which sessions are holding up other sessions.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT
+      blocked.pid AS blocked_pid,
+      blocked.usename AS blocked_user,
+      LEFT(blocked.query, 150) AS blocked_query,
+      EXTRACT(EPOCH FROM (now() - blocked.query_start))::int AS blocked_duration_sec,
+      blocking.pid AS blocking_pid,
+      blocking.usename AS blocking_user,
+      LEFT(blocking.query, 150) AS blocking_query,
+      EXTRACT(EPOCH FROM (now() - blocking.query_start))::int AS blocking_duration_sec
+  FROM pg_stat_activity blocked
+  JOIN pg_locks bl ON bl.pid = blocked.pid AND NOT bl.granted
+  JOIN pg_locks gl ON gl.locktype = bl.locktype AND gl.database IS NOT DISTINCT FROM bl.database
+      AND gl.relation IS NOT DISTINCT FROM bl.relation AND gl.page IS NOT DISTINCT FROM bl.page
+      AND gl.tuple IS NOT DISTINCT FROM bl.tuple AND gl.virtualxid IS NOT DISTINCT FROM bl.virtualxid
+      AND gl.transactionid IS NOT DISTINCT FROM bl.transactionid AND gl.classid IS NOT DISTINCT FROM bl.classid
+      AND gl.objid IS NOT DISTINCT FROM bl.objid AND gl.objsubid IS NOT DISTINCT FROM bl.objsubid
+      AND gl.pid != bl.pid AND gl.granted
+  JOIN pg_stat_activity blocking ON blocking.pid = gl.pid
+  ORDER BY blocked_duration_sec DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

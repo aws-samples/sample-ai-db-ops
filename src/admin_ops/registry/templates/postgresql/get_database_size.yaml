@@ -1,0 +1,14 @@
+template_id: pg_get_database_size
+engine: postgresql
+tool_function_name: get_database_size
+tier: 1
+description: Total size of the current database.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT current_database() as db_name,
+         pg_size_pretty(pg_database_size(current_database())) as total_size,
+         pg_database_size(current_database()) as size_bytes;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

@@ -1,0 +1,25 @@
+template_id: ora_get_slow_queries
+engine: oracle
+tool_function_name: get_slow_queries
+tier: 1
+description: Top N slowest SQL statements from v$sqlarea ordered by avg elapsed time.
+owner: dbops-platform
+parameters:
+  - name: n
+    type: int
+    default: 10
+    min: 1
+    max: 100
+body: |
+  SELECT sql_id, SUBSTR(sql_text, 1, 300) AS sql_text,
+         executions, ROUND(elapsed_time/1000000, 2) AS elapsed_sec,
+         ROUND(elapsed_time/GREATEST(executions,1)/1000000, 3) AS avg_sec,
+         buffer_gets, disk_reads, rows_processed
+  FROM v$sqlarea
+  WHERE parsing_schema_name NOT IN ('SYS','SYSTEM','RDSADMIN')
+    AND executions > 0
+  ORDER BY elapsed_time/GREATEST(executions,1) DESC
+  FETCH FIRST :n ROWS ONLY
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

@@ -1,0 +1,19 @@
+template_id: my_get_innodb_status
+engine: mysql
+tool_function_name: get_innodb_status
+tier: 1
+description: Selected InnoDB global status counters used to summarise engine health.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT variable_name, variable_value FROM performance_schema.global_status
+  WHERE variable_name IN (
+      'Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads',
+      'Innodb_rows_read', 'Innodb_rows_inserted', 'Innodb_rows_updated', 'Innodb_rows_deleted',
+      'Innodb_deadlocks', 'Innodb_row_lock_waits', 'Innodb_row_lock_time_avg',
+      'Innodb_buffer_pool_pages_total', 'Innodb_buffer_pool_pages_free',
+      'Threads_connected', 'Threads_running', 'Uptime'
+  );
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

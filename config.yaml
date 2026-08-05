@@ -1,0 +1,153 @@
+# =============================================================================
+# Agentic DB Ops — Account & Resource Configuration
+# =============================================================================
+# This file is the single source of truth for account-scoped settings.
+# It documents the resources used by the agents and UI; secret values are
+# NOT stored here — they live in AWS Secrets Manager.
+#
+# To deploy this stack against a different account, copy this file, update the
+# values, and run the deploy scripts.
+# =============================================================================
+
+account:
+  id: "123456789012"
+  alias: dbops-user
+  region: us-east-1
+
+# -----------------------------------------------------------------------------
+# Network — agents and databases share this VPC, so private connectivity is
+# direct (no peering hop). Subnets listed below are AgentCore-supported AZs.
+# -----------------------------------------------------------------------------
+network:
+  vpc_id: vpc-0xxxxxxxxxxxxxxxx
+  vpc_name: Database-VPC
+  vpc_cidr: 10.0.0.0/16
+  agent_subnets:
+    - id: subnet-0xxxxxxxxxxxxxxxx   # us-east-1d / use1-az4
+      cidr: 10.0.5.0/24
+      name: Database Private subnet 1
+    - id: subnet-0yyyyyyyyyyyyyyyy   # us-east-1b / use1-az1
+      cidr: 10.0.4.0/24
+      name: ELB Subnet2
+  agent_security_groups:
+    - sg-0xxxxxxxxxxxxxxxx           # rds-ec2-2 (Oracle)
+    - sg-0yyyyyyyyyyyyyyyy           # rds-launch-wizard (Oracle + MySQL via 3306)
+
+# -----------------------------------------------------------------------------
+# Databases — the agents talk to these instances directly.
+# Passwords live in Secrets Manager under the secret_id paths below.
+# -----------------------------------------------------------------------------
+databases:
+  postgresql:
+    cluster_id: database-test
+    engine: aurora-postgresql
+    engine_version: "15.4"
+    endpoint: database-test.cluster-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
+    port: 5432
+    master_username: postgres
+    default_database: postgres
+    secret_id: dbops/aurora-pg/primary
+    secret_arn: arn:aws:secretsmanager:us-east-1:123456789012:secret:dbops/aurora-pg/primary-XXXXXX
+
+  mysql:
+    cluster_id: dbops-aurora-mysql
+    engine: aurora-mysql
+    engine_version: 8.0.mysql_aurora.3.07.1
+    endpoint: dbops-aurora-mysql.cluster-xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
+    port: 3306
+    master_username: admin
+    default_database: appdb
+    secret_id: dbops/aurora-mysql/primary
+    secret_arn: arn:aws:secretsmanager:us-east-1:123456789012:secret:dbops/aurora-mysql/primary-XXXXXX
+
+  oracle:
+    instance_id: oracle-prod
+    engine: oracle-ee
+    endpoint: oracle-prod.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
+    port: 1521
+    sid: ORACLEV
+    master_username: admin
+    secret_id: dbops/oracle/oracle-prod
+    secret_arn: arn:aws:secretsmanager:us-east-1:123456789012:secret:dbops/oracle/oracle-prod-XXXXXX
+    notes: >-
+      RDS-managed Oracle EE 19c. Do not modify configuration directly — only
+      the secret value is updated by this project. The `sid` here matches what
+      the listener exposes (DBName), not the literal Oracle SID.
+
+  dynamodb:
+    region: us-east-1
+    primary_table: dbops-orders
+    other_tables:
+      - dbops-registry
+      - dbops-gamification
+      - dbops-leaderboard
+
+# -----------------------------------------------------------------------------
+# AgentCore Runtime — one runtime per engine. Each runs in VPC mode, in the
+# subnets and security groups listed in `network` above.
+# These ARNs are written into ui/.env.local for the UI to invoke.
+# -----------------------------------------------------------------------------
+agents:
+  postgresql:
+    name: dbops_postgresql
+    runtime_arn: arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/dbops_postgresql-XXXXXXXXXX
+    execution_role: AmazonBedrockAgentCoreSDKRuntime-us-east-1-xxxxxxxxxx
+    tool_count: 31
+
+  mysql:
+    name: dbops_mysql
+    runtime_arn: arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/dbops_mysql-XXXXXXXXXX
+    execution_role: AmazonBedrockAgentCoreSDKRuntime-us-east-1-yyyyyyyyyy
+    tool_count: 24
+
+  oracle:
+    name: dbops_oracle
+    runtime_arn: arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/dbops_oracle-XXXXXXXXXX
+    execution_role: AmazonBedrockAgentCoreSDKRuntime-us-east-1-zzzzzzzzzz
+    tool_count: 24
+
+  dynamodb:
+    name: dbops_dynamodb
+    runtime_arn: arn:aws:bedrock-agentcore:us-east-1:123456789012:runtime/dbops_dynamodb-XXXXXXXXXX
+    execution_role: AmazonBedrockAgentCoreSDKRuntime-us-east-1-aaaaaaaaaa
+    tool_count: 17
+
+# -----------------------------------------------------------------------------
+# Shared IAM
+# -----------------------------------------------------------------------------
+iam:
+  agent_permissions_policy: arn:aws:iam::123456789012:policy/dbops-agent-permissions
+  policy_template: infra/agent-permissions-policy.json
+
+# -----------------------------------------------------------------------------
+# Knowledge Graph (DBA View) — admin-gated, read-only Neptune-backed single pane.
+# `gating_state` is the fail-closed gate: pending = provisioned but off (schema
+# only), approved = live, not_approved = intentionally withheld. Any other value
+# (or a missing key) fails closed. The Neptune endpoint is supplied at deploy
+# time; no resource id is embedded here.
+# -----------------------------------------------------------------------------
+knowledge_graph:
+  gating_state: pending
+  neptune_endpoint: ""   # set at deploy time; e.g. db-neptune-xxxx.cluster-yyyy.<region>.neptune.amazonaws.com
+
+# -----------------------------------------------------------------------------
+# UI defaults — same values land in ui/.env.local
+# -----------------------------------------------------------------------------
+ui:
+  port: 3001
+  default_user_id: dbops-user
+  python_bin: /Users/dbops-user/Downloads/AI-DB-OPS/.venv/bin/python3
+  # Set at deploy time. Left empty on purpose: AgentCore's sources bucket is
+  # named bedrock-agentcore-codebuild-sources-<account-id>-<region>, so writing
+  # a concrete name here would publish a real, registrable bucket name that
+  # someone else could create first and then receive uploads into. The upload
+  # route derives it from AWS_ACCOUNT_ID, or takes UPLOAD_BUCKET verbatim, and
+  # refuses to start the upload if neither is supplied.
+  upload_bucket: ""
+  upload_prefix: dbops-uploads
+# -----------------------------------------------------------------------------
+# Reports — archived Health_Reports are written to this bucket. No default:
+# see the note on ui.upload_bucket above. Overridable with REPORTS_BUCKET.
+# -----------------------------------------------------------------------------
+reports:
+  bucket: ""

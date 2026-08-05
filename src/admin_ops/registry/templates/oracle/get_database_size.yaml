@@ -1,0 +1,16 @@
+template_id: ora_get_database_size
+engine: oracle
+tool_function_name: get_database_size
+tier: 1
+description: Total database size and segment-type breakdown from dba_segments.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT ROUND(SUM(bytes)/1024/1024/1024, 2) AS total_gb,
+         segment_type, COUNT(*) AS segments
+  FROM dba_segments
+  GROUP BY segment_type
+  ORDER BY SUM(bytes) DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

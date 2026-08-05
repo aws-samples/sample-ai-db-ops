@@ -1,0 +1,29 @@
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.env
+.bedrock_agentcore.yaml
+.agentcore_cache/
+.bedrock_agentcore/
+dependencies.zip
+*.zip
+
+# local generated passwords
+.secrets/
+ui/.env.local
+
+# Local security-tooling state (holds internal scan/project identifiers)
+.holmes/
+
+.venv/
+
+# OS / editor / build noise
+.DS_Store
+ui/tsconfig.tsbuildinfo
+*.docx
+# Presentation and demo artifacts must not be committed to this repository.
+# Internal decks, PR/FAQs, demo run-of-shows, and generated report samples are
+# kept outside the source tree.
+docs/demo/
+*.pptx

@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Minimal probe to isolate EarlyValidation failure
+Resources:
+  DbOpsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "CMK for DB Ops encryption (DynamoDB, Secrets Manager)"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:PutKeyPolicy
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            # In a KMS key policy, "*" means only the key to which this
+            # policy is attached; key policies require this resource value.
+            Resource: "*"
+
+  ProbeTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: dbops-probe
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true

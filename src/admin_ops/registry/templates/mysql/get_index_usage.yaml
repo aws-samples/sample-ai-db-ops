@@ -1,0 +1,16 @@
+template_id: my_get_index_usage
+engine: mysql
+tool_function_name: get_index_usage
+tier: 1
+description: Index usage counters from performance_schema for the current database.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT object_schema, object_name as table_name, index_name,
+         count_star as usage_count, count_read, count_write
+  FROM performance_schema.table_io_waits_summary_by_index_usage
+  WHERE object_schema = DATABASE() AND index_name IS NOT NULL
+  ORDER BY count_star ASC LIMIT 20;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

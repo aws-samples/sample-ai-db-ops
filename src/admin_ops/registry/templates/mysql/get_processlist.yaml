@@ -1,0 +1,14 @@
+template_id: my_get_processlist
+engine: mysql
+tool_function_name: get_processlist
+tier: 1
+description: Active (non-Sleep) connections from information_schema.processlist.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT id, user, host, db, command, time, state, LEFT(info, 200) as info
+  FROM information_schema.processlist
+  WHERE command != 'Sleep' ORDER BY time DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

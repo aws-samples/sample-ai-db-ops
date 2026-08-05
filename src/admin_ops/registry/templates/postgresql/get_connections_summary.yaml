@@ -1,0 +1,14 @@
+template_id: pg_get_connections_summary
+engine: postgresql
+tool_function_name: get_connections_summary
+tier: 1
+description: Connection count by state from pg_stat_activity.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT state, COUNT(*) as count
+  FROM pg_stat_activity
+  GROUP BY state ORDER BY count DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

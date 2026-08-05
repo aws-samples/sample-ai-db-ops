@@ -1,0 +1,27 @@
+# AWS CodeBuild spec: build the demo container image and push to ECR.
+# Used by the dbops-demo-build CodeBuild project (source = S3 zip of this repo).
+# Requires privileged mode (Docker) and a service role with ECR push + logs.
+version: 0.2
+
+env:
+  variables:
+    IMAGE_REPO_NAME: "dbops-demo"
+    IMAGE_TAG: "latest"
+
+phases:
+  pre_build:
+    commands:
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPO=$REGISTRY/$IMAGE_REPO_NAME
+      - echo "Logging in to ECR $REGISTRY"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REGISTRY
+  build:
+    commands:
+      - echo "Building $REPO:$IMAGE_TAG"
+      - docker build -t $REPO:$IMAGE_TAG .
+  post_build:
+    commands:
+      - echo "Pushing $REPO:$IMAGE_TAG"
+      - docker push $REPO:$IMAGE_TAG
+      - echo "Done. Image $REPO:$IMAGE_TAG"

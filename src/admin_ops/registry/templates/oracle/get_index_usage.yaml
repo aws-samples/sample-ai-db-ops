@@ -1,0 +1,22 @@
+template_id: ora_get_index_usage
+engine: oracle
+tool_function_name: get_index_usage
+tier: 1
+description: Index inventory and stats for a schema, used to find unused or inefficient indexes.
+owner: dbops-platform
+parameters:
+  - name: owner
+    type: string
+    max: 64
+body: |
+  SELECT i.index_name, i.table_name, i.index_type,
+         ROUND(s.bytes/1024/1024, 2) AS size_mb,
+         i.distinct_keys, i.clustering_factor, i.last_analyzed,
+         i.status, i.visibility
+  FROM dba_indexes i
+  LEFT JOIN dba_segments s ON s.owner = i.owner AND s.segment_name = i.index_name
+  WHERE i.owner = :owner
+  ORDER BY s.bytes DESC NULLS LAST
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

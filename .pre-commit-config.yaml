@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: no-resource-ids
+        name: No AWS account / resource IDs in source
+        entry: python3 scripts/check_no_resource_ids.py
+        language: system
+        pass_filenames: true
+        types: [text]

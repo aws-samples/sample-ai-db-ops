@@ -1,0 +1,16 @@
+rules:
+  - id: no-fstring-sql
+    message: >
+      Caller-supplied values must go through parameter binding
+      (`%s` / `%(name)s` / `:name`), not f-string or %-format interpolation.
+      Use `src.admin_ops.db.execute.execute_with_params(conn, sql, params)`
+      instead of formatting SQL directly. (Property R7.6 / R7.7)
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: $CUR.execute(f"...")
+      - pattern: $CUR.execute(f"...", ...)
+      - pattern: $CUR.execute("..." % $X)
+      - pattern: $CUR.execute("..." % $X, ...)
+      - pattern: $CUR.executemany(f"...", ...)
+      - pattern: $CUR.executemany("..." % $X, ...)

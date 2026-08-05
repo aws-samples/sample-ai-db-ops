@@ -1,0 +1,20 @@
+template_id: pg_get_vacuum_status
+engine: postgresql
+tool_function_name: get_vacuum_status
+tier: 1
+description: Vacuum status, dead tuples, and last vacuum times for the top tables.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT schemaname, relname as table_name,
+         n_live_tup, n_dead_tup,
+         CASE WHEN n_live_tup > 0
+             THEN round(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 1)
+             ELSE 0 END as dead_pct,
+         last_vacuum::text, last_autovacuum::text,
+         vacuum_count, autovacuum_count
+  FROM pg_stat_user_tables
+  ORDER BY n_dead_tup DESC LIMIT 20;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

@@ -1,0 +1,26 @@
+/*
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+@page { size: A4; margin: 18mm; }
+body { font-family: -apple-system, "Segoe UI", "Helvetica Neue", sans-serif; color: #0f172a; line-height: 1.45; font-size: 11pt; }
+h1 { font-size: 22pt; margin: 0 0 6pt 0; color: #0f172a; }
+h2 { font-size: 13pt; margin-top: 18pt; color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 3pt; }
+table { border-collapse: collapse; width: 100%; margin: 6pt 0 12pt 0; font-size: 9.5pt; }
+th, td { border: 1px solid #cbd5e1; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+th { background-color: #f1f5f9; font-weight: 600; }
+ul { margin: 4pt 0 8pt 16pt; }
+code { background-color: #f1f5f9; padding: 1pt 3pt; border-radius: 2pt; font-size: 9.5pt; }
+blockquote { border-left: 3pt solid #f59e0b; background: #fff7ed; margin: 6pt 0; padding: 4pt 8pt; }

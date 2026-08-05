@@ -1,0 +1,6 @@
+# git-secrets allowlist — documented, non-sensitive placeholders only.
+# 123456789012 is the canonical AWS documentation example account ID
+# (https://docs.aws.amazon.com/accounts/latest/reference/manage-acct-identifiers.html).
+# Real account IDs are never committed; they are supplied via environment
+# variables / config at runtime and enforced by scripts/check_no_resource_ids.py.
+123456789012

@@ -1,0 +1,13 @@
+template_id: ora_get_connections_summary
+engine: oracle
+tool_function_name: get_connections_summary
+tier: 1
+description: User session count grouped by status from v$session.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT status, COUNT(*) AS cnt FROM v$session WHERE type = 'USER'
+  GROUP BY status ORDER BY cnt DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

@@ -1,0 +1,92 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  DynamoDB tables for the admin-ops-console feature. Deploy alongside the
+  account-specific stack (`infra/cloudformation-account-specific.yaml`).
+  No literal AWS account, VPC, or resource IDs in this template — every
+  ARN that appears at runtime is derived from runtime context.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dbops
+    Description: Prefix shared by every admin-ops-console table.
+
+Resources:
+
+  # -----------------------------------------------------------------------
+  # KMS CMK — encrypts the admin-ops-console DynamoDB table.
+  # -----------------------------------------------------------------------
+  DbOpsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "CMK for ${EnvironmentName} DB Ops encryption (DynamoDB, Secrets Manager)"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableRootAccountAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListGrants
+              - kms:ListKeyPolicies
+              - kms:ListResourceTags
+              - kms:PutKeyPolicy
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            # In a KMS key policy, "*" means only the key to which this
+            # policy is attached; key policies require this resource value.
+            Resource: "*"
+
+  # -----------------------------------------------------------------------
+  # 1.2 Admin role table — backs `src/admin_ops/admin/role.py`.
+  # -----------------------------------------------------------------------
+  DbopsAdminsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${EnvironmentName}-admins
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref DbOpsKmsKey
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Feature
+          Value: admin-ops-console
+
+Outputs:
+  DbopsAdminsTableName:
+    Value: !Ref DbopsAdminsTable
+    Export:
+      Name: !Sub ${EnvironmentName}-AdminsTableName

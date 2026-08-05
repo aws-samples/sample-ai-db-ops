@@ -1,0 +1,42 @@
+{
+  "name": "dbops-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0",
+  "description": "",
+  "dependencies": {
+    "@aws-sdk/client-bedrock-agent-runtime": "^3.1045.0",
+    "@aws-sdk/client-s3": "^3.1046.0",
+    "@aws-sdk/s3-request-presigner": "^3.1046.0",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.43.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@types/node": "^25.7.0",
+    "@types/react": "^19.2.14",
+    "@uiw/react-codemirror": "^4.25.10",
+    "@xyflow/react": "^12.10.2",
+    "autoprefixer": "^10.5.0",
+    "next": "^16.2.12",
+    "postcss": "^8.5.19",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "swr": "^2.4.1",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "postcss": "$postcss",
+    "sharp": "^0.35.3"
+  }
+}

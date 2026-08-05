@@ -1,0 +1,27 @@
+# =============================================================================
+# Agentic DB Ops — DEMO config (placeholder-only, hosted demo container).
+# =============================================================================
+# Used by the demo container via ADMIN_OPS_CONFIG_PATH=/app/config.demo.yaml.
+# Differs from the committed config.yaml ONLY in that knowledge_graph.gating_state
+# is `approved` so the hosted DBA View renders the graph. All resource values
+# are documented placeholders — no real account id, ARN, VPC/subnet/SG id, or
+# alias (P14 / R7.6). The demo reads in-process seeded data (ADMIN_DEV_BYPASS=1),
+# so these placeholders are never used to reach AWS.
+
+account:
+  id: "123456789012"
+  alias: dbops-demo
+  region: us-east-1
+
+# Knowledge Graph (DBA View) — approved for the hosted demo so the Graph
+# Explorer renders. The production config.yaml ships as `pending`.
+knowledge_graph:
+  gating_state: approved
+  neptune_endpoint: ""   # demo runs on the in-process seeded store; no Neptune
+
+admin:
+  table_name: dbops-admins
+
+ui:
+  port: 3001
+  default_user_id: demo-user

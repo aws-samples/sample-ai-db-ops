@@ -1,0 +1,12 @@
+template_id: ddb_get_table_metrics
+engine: dynamodb
+tool_function_name: get_table_metrics
+tier: 1
+description: Fixed CloudWatch metric list pulled for DynamoDB table health.
+owner: dbops-platform
+parameters: []
+body: |
+  {"metrics": ["ConsumedReadCapacityUnits", "ConsumedWriteCapacityUnits", "ReadThrottleEvents", "WriteThrottleEvents", "SuccessfulRequestLatency"]}
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

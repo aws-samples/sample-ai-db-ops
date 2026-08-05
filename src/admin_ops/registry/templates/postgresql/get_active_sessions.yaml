@@ -1,0 +1,18 @@
+template_id: pg_get_active_sessions
+engine: postgresql
+tool_function_name: get_active_sessions
+tier: 1
+description: Active (non-idle) backends from pg_stat_activity.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT pid, usename, application_name, client_addr::text,
+         state, wait_event_type, wait_event,
+         LEFT(query, 200) as query_text,
+         EXTRACT(EPOCH FROM (now() - query_start))::int as duration_sec
+  FROM pg_stat_activity
+  WHERE state != 'idle' AND pid != pg_backend_pid()
+  ORDER BY query_start ASC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

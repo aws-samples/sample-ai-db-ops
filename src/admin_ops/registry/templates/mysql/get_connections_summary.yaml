@@ -1,0 +1,13 @@
+template_id: my_get_connections_summary
+engine: mysql
+tool_function_name: get_connections_summary
+tier: 1
+description: Connection count grouped by command from information_schema.processlist.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT command as state, COUNT(*) as count
+  FROM information_schema.processlist GROUP BY command ORDER BY count DESC;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

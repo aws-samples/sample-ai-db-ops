@@ -1,0 +1,28 @@
+# AWS App Runner config for the Agentic DB Ops demo container.
+# Used when App Runner builds from source; for an image-based service the same
+# runtime env is set on the service instead. Port + env mirror the Dockerfile.
+version: 1.0
+runtime: docker
+build:
+  commands:
+    build:
+      - echo "Image is built from the repo Dockerfile"
+run:
+  command: npm run start
+  network:
+    port: 3001
+  env:
+    - name: PORT
+      value: "3001"
+    - name: NODE_ENV
+      value: "production"
+    - name: ADMIN_DEV_BYPASS
+      value: "1"
+    - name: PYTHON_BIN
+      value: "/app/.venv/bin/python3"
+    - name: ADMIN_OPS_CONFIG_PATH
+      value: "/app/config.demo.yaml"
+    - name: NEXT_PUBLIC_USER_ID
+      value: "demo-user"
+    - name: AWS_REGION
+      value: "us-east-1"

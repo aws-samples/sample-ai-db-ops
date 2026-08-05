@@ -1,0 +1,17 @@
+template_id: ora_get_wait_events
+engine: oracle
+tool_function_name: get_wait_events
+tier: 1
+description: Active wait events grouped by wait class and event from v$session.
+owner: dbops-platform
+parameters: []
+body: |
+  SELECT wait_class, event, COUNT(*) AS session_count,
+         ROUND(SUM(seconds_in_wait)) AS total_wait_sec
+  FROM v$session
+  WHERE wait_class != 'Idle' AND type = 'USER'
+  GROUP BY wait_class, event
+  ORDER BY session_count DESC
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

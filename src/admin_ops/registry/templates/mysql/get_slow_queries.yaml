@@ -1,0 +1,25 @@
+template_id: my_get_slow_queries
+engine: mysql
+tool_function_name: get_slow_queries
+tier: 1
+description: Slowest digests from performance_schema for the current database.
+owner: dbops-platform
+parameters:
+  - name: top_n
+    type: int
+    default: 10
+    min: 1
+    max: 100
+body: |
+  SELECT LEFT(digest_text, 200) as query_text,
+         count_star as calls,
+         ROUND(sum_timer_wait / 1000000000000, 3) as total_time_sec,
+         ROUND(avg_timer_wait / 1000000000000, 3) as avg_time_sec,
+         sum_rows_examined as rows_examined,
+         sum_rows_sent as rows_sent
+  FROM performance_schema.events_statements_summary_by_digest
+  WHERE schema_name = DATABASE() AND digest_text IS NOT NULL
+  ORDER BY avg_timer_wait DESC LIMIT %(top_n)s;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user

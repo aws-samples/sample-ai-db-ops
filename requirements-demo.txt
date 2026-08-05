@@ -1,0 +1,11 @@
+# Python deps for the demo container's callPython backend.
+# Only what the admin-ops / changefeed / kg routes import — NOT the agent
+# runtime deps (strands-*), which run in AgentCore, not in the UI container.
+# Pinned to the versions verified in the local .venv.
+boto3==1.43.12
+botocore==1.43.12
+pydantic==2.13.4
+pydantic-settings==2.14.1
+PyYAML==6.0.3
+Markdown==3.10.2
+requests==2.34.2

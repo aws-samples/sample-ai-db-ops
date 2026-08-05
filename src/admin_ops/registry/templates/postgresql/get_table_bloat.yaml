@@ -1,0 +1,24 @@
+template_id: pg_get_table_bloat
+engine: postgresql
+tool_function_name: get_table_bloat
+tier: 1
+description: Tables with dead tuples in the given schema, ordered by dead-tuple count.
+owner: dbops-platform
+parameters:
+  - name: schema_name
+    type: string
+    default: public
+    max: 64
+body: |
+  SELECT schemaname, relname as table_name, n_live_tup, n_dead_tup,
+         CASE WHEN n_live_tup > 0
+             THEN round(100.0 * n_dead_tup / (n_live_tup + n_dead_tup), 1)
+             ELSE 0 END as dead_tuple_pct,
+         last_vacuum::text, last_autovacuum::text,
+         pg_size_pretty(pg_total_relation_size(schemaname || '.' || relname)) as table_size
+  FROM pg_stat_user_tables
+  WHERE schemaname = %(schema_name)s AND n_dead_tup > 0
+  ORDER BY n_dead_tup DESC LIMIT 20;
+version: 1
+updated_at: 2026-05-28T00:00:00Z
+updated_by: dbops-user
