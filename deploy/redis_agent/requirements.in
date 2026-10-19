@@ -8,4 +8,4 @@ bedrock-agentcore==1.19.0
 # Explicit security constraints for transitive dependencies.
 aiohttp==3.14.1
 python-multipart==0.0.32
-mcp==1.28.1
+mcp==1.30.0
