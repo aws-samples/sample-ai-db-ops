@@ -17,14 +17,13 @@ description = "Gamified AI-powered database operations agent using Strands Agent
 requires-python = ">=3.11"
 dependencies = [
     "strands-agents==1.47.0",
-    "strands-agents-tools==0.8.3",
     "boto3==1.43.49",
     "pydantic==2.13.4",
     "pydantic-settings==2.14.2",
     # Pinned to close known advisories in the transitive graph; see requirements.in.
-    "aiohttp==3.14.1",
+    "aiohttp==3.14.4",
     "python-multipart==0.0.32",
-    "mcp==1.28.1",
+    "mcp==1.30.0",
 ]
 
 # Engine drivers are optional so a deployment installs only the ones it needs.

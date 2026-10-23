@@ -16,18 +16,18 @@ Python dependencies (requirements.txt)
 
 | Package                | Version | License                     | Project                                             |
 |------------------------|---------|-----------------------------|-----------------------------------------------------|
-| aiohttp                | 3.14.1  | Apache-2.0                  | https://github.com/aio-libs/aiohttp                 |
-| bedrock-agentcore      | 1.18.0  | Apache-2.0                  | https://github.com/aws/bedrock-agentcore-sdk-python |
+| aiohttp                | 3.14.4  | Apache-2.0                  | https://github.com/aio-libs/aiohttp                 |
+| bedrock-agentcore      | 1.19.0  | Apache-2.0                  | https://github.com/aws/bedrock-agentcore-sdk-python |
 | boto3                  | 1.43.49 | Apache-2.0                  | https://github.com/boto/boto3                       |
-| mcp                    | 1.28.1  | MIT                         | https://github.com/modelcontextprotocol/python-sdk  |
+| mcp                    | 1.30.0  | MIT                         | https://github.com/modelcontextprotocol/python-sdk  |
 | oracledb               | 4.0.2   | Apache-2.0 OR UPL-1.0       | https://github.com/oracle/python-oracledb           |
 | psycopg2-binary        | 2.9.12  | LGPL-3.0 with exceptions    | https://github.com/psycopg/psycopg2                 |
 | pydantic               | 2.13.4  | MIT                         | https://github.com/pydantic/pydantic                |
 | pydantic-settings      | 2.14.2  | MIT                         | https://github.com/pydantic/pydantic-settings       |
+| pymssql                | 2.4.3   | LGPL-2.1                    | https://github.com/pymssql/pymssql                  |
 | pymysql                | 1.2.0   | MIT                         | https://github.com/PyMySQL/PyMySQL                  |
 | python-multipart       | 0.0.32  | Apache-2.0                  | https://github.com/Kludex/python-multipart           |
 | strands-agents         | 1.47.0  | Apache-2.0                  | https://github.com/strands-agents/sdk-python        |
-| strands-agents-tools   | 0.8.3   | Apache-2.0                  | https://github.com/strands-agents/tools             |
 
 --------------------------------------------------------------------------
 UI dependencies (ui/package.json)
@@ -65,7 +65,7 @@ Notes
 - The project is distributed under Apache-2.0; each dependency remains
   governed by its own license as listed above.
 - Python direct dependencies and explicit security constraints are exact-pinned
-  in six requirements.in files. Their complete transitive graphs are resolved
+  in seven requirements.in files. Their complete transitive graphs are resolved
   and hash-locked in the corresponding requirements.txt files for Python 3.12
   on Linux ARM64.
 - UI dependencies, including resolved transitive versions and license metadata,
@@ -85,3 +85,7 @@ Notes
   outright, substitute a PostgreSQL driver under a permissive license (for
   example `pg8000`, BSD-3-Clause) and update the connection helper in
   `src/admin_ops/db/tls.py` and `src/connections/manager.py` accordingly.
+- pymssql (used only by the SQL Server agent) is distributed under the GNU
+  Lesser General Public License 2.1. As with psycopg2, it is used only as an
+  unmodified, dynamically imported library, so LGPL obligations would attach
+  only if pymssql itself were modified and redistributed.
