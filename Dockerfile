@@ -19,8 +19,11 @@
 # routes shell out to (callPython / resolve-admin). This preserves the real
 # architecture so the hosted demo behaves exactly like local dev.
 #
-# Demo mode (ADMIN_DEV_BYPASS=1) makes the Change Feed + DBA Knowledge Graph
-# read an in-process seeded store — no Neptune / live DB needed.
+# Demo mode is opt-in. Running the container with ADMIN_DEV_BYPASS=1 makes the
+# Change Feed + DBA Knowledge Graph read an in-process seeded store (no Neptune
+# or live database needed) AND treats every signed-in user as an admin. It is
+# not set here, so the image enforces the dbops-admins check by default. Set it
+# only for a single-user demo on seeded data, never on a shared deployment.
 # ---------------------------------------------------------------------------
 
 # ---- Stage 1: build the Next.js production bundle -------------------------
@@ -38,7 +41,6 @@ FROM public.ecr.aws/docker/library/node:20-bookworm-slim AS runtime
 ENV PYTHONUNBUFFERED=1 \
     NODE_ENV=production \
     PORT=3001 \
-    ADMIN_DEV_BYPASS=1 \
     PYTHON_BIN=/app/.venv/bin/python3 \
     ADMIN_OPS_CONFIG_PATH=/app/config.demo.yaml \
     CHANGEFEED_DEV_STATE_FILE=/app/src/admin_ops/changefeed/data/demo_seed.json \

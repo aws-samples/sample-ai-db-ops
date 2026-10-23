@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Read-only execution roles for the DB Ops specialist runtimes that serve AWS
+  DevOps Agent (dbops_oracle_readonly, dbops_sqlserver_readonly). These runtimes
+  run with DBOPS_READ_ONLY_MODE=true, so their tool catalog has no mutating
+  tool. These roles make the same guarantee at the AWS layer: every AWS action
+  granted here is a Describe, Get or observability write, and the RDS action is
+  scoped to the one pinned instance. The interactive runtimes keep their own
+  role and are not affected by this stack.
+
+Parameters:
+  OracleSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:dbops/[A-Za-z0-9/_+=.@-]+$'
+    Description: Full ARN of the Oracle connection secret.
+  OracleDbInstanceIdentifier:
+    Type: String
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9-]{0,62}$'
+    Description: The one RDS instance the Oracle runtime may describe.
+  SqlServerSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:dbops/[A-Za-z0-9/_+=.@-]+$'
+    Description: Full ARN of the SQL Server connection secret.
+  SqlServerSecretKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$'
+    Description: >-
+      Customer managed key that encrypts the SQL Server secret (the
+      SecretKmsKeyArn output of infra/sqlserver-ec2.yaml). Leave empty if the
+      secret uses the AWS managed key.
+  CodeBucketName:
+    Type: String
+    Default: ''
+    Description: >-
+      Bucket that holds the direct_code_deploy bundles. Leave empty to use
+      bedrock-agentcore-codebuild-sources-<account>-<region>.
+  OracleRuntimeName:
+    Type: String
+    Default: dbops_oracle_readonly
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,47}$'
+  SqlServerRuntimeName:
+    Type: String
+    Default: dbops_sqlserver_readonly
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,47}$'
+
+Conditions:
+  DefaultCodeBucket: !Equals [!Ref CodeBucketName, '']
+  HasSqlServerSecretKey: !Not [!Equals [!Ref SqlServerSecretKmsKeyArn, '']]
+
+Resources:
+  # Permissions every AgentCore runtime needs: logs, traces, its own metrics,
+  # model invocation, and its workload identity. None of them can change a
+  # database or an AWS resource outside observability data.
+  RuntimeBasePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Base AgentCore runtime permissions for the read-only DB Ops specialists.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RuntimeLogGroups
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DescribeLogStreams
+            Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*'
+          - Sid: RuntimeLogStreams
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'
+          - Sid: DescribeLogGroups
+            Effect: Allow
+            Action: logs:DescribeLogGroups
+            Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+          - Sid: Tracing
+            Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+              - xray:GetSamplingRules
+              - xray:GetSamplingTargets
+            Resource: '*'
+          - Sid: RuntimeMetrics
+            Effect: Allow
+            Action: cloudwatch:PutMetricData
+            Resource: '*'
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: bedrock-agentcore
+          - Sid: ModelInvocation
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
+              - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*'
+          - Sid: WorkloadIdentity
+            Effect: Allow
+            Action:
+              - bedrock-agentcore:GetWorkloadAccessToken
+              - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+              - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default'
+              - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/${OracleRuntimeName}-*'
+              - !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/${SqlServerRuntimeName}-*'
+
+  OracleReadOnlyRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for the read-only Oracle specialist runtime.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      ManagedPolicyArns:
+        - !Ref RuntimeBasePolicy
+      Policies:
+        - PolicyName: oracle-readonly-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadConnectionSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref OracleSecretArn
+              - Sid: DescribePinnedInstance
+                Effect: Allow
+                Action: rds:DescribeDBInstances
+                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${OracleDbInstanceIdentifier}'
+              - Sid: ReadMetrics
+                Effect: Allow
+                Action: cloudwatch:GetMetricStatistics
+                Resource: '*'
+              - Sid: ReadCodeBundle
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/${OracleRuntimeName}/*'
+                  - Bucket: !If
+                      - DefaultCodeBucket
+                      - !Sub 'bedrock-agentcore-codebuild-sources-${AWS::AccountId}-${AWS::Region}'
+                      - !Ref CodeBucketName
+
+  SqlServerReadOnlyRuntimeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Execution role for the read-only SQL Server specialist runtime.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*'
+      ManagedPolicyArns:
+        - !Ref RuntimeBasePolicy
+      Policies:
+        - PolicyName: sqlserver-readonly-access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadConnectionSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SqlServerSecretArn
+              - !If
+                - HasSqlServerSecretKey
+                - Sid: DecryptConnectionSecret
+                  Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref SqlServerSecretKmsKeyArn
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+                - !Ref AWS::NoValue
+              # ec2:DescribeInstances does not support resource-level
+              # permissions. The agent itself pins the instance ID from
+              # SQLSERVER_EC2_INSTANCE_ID and takes no instance argument.
+              - Sid: DescribeHost
+                Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: '*'
+              - Sid: ReadMetrics
+                Effect: Allow
+                Action: cloudwatch:GetMetricStatistics
+                Resource: '*'
+              - Sid: ReadCodeBundle
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/${SqlServerRuntimeName}/*'
+                  - Bucket: !If
+                      - DefaultCodeBucket
+                      - !Sub 'bedrock-agentcore-codebuild-sources-${AWS::AccountId}-${AWS::Region}'
+                      - !Ref CodeBucketName
+
+Outputs:
+  OracleReadOnlyRuntimeRoleArn:
+    Value: !GetAtt OracleReadOnlyRuntimeRole.Arn
+  SqlServerReadOnlyRuntimeRoleArn:
+    Value: !GetAtt SqlServerReadOnlyRuntimeRole.Arn

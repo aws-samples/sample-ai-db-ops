@@ -50,7 +50,7 @@ Environment variables
 
 ``DB_SSL_CA_BUNDLE``
     Path to a CA bundle. For Amazon RDS and Aurora, download ``global-bundle.pem``
-    from https://truststore.pki.rds.amazon.com/global/global-bundle.pem. When
+    from https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem. When
     set, the server certificate **and** hostname are verified.
 
 ``DB_TLS_ALLOW_UNVERIFIED``
@@ -180,10 +180,60 @@ def _unverified_or_raise(engine: str) -> None:
     raise TlsConfigurationError(
         f"{engine}: refusing to connect without certificate verification. "
         f"Set {CA_BUNDLE_ENV} to a CA bundle (for Amazon RDS and Aurora, "
-        f"https://truststore.pki.rds.amazon.com/global/global-bundle.pem), or "
+        f"https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem), or "
         f"set {ALLOW_UNVERIFIED_ENV}=true to accept an encrypted but "
         f"unverified connection."
     )
+
+
+def mssql_connect_kwargs(host: str | None = None) -> dict[str, Any]:
+    """Return ``pymssql.connect`` keyword arguments for encryption in transit.
+
+    What TDS actually guarantees
+    ---------------------------
+
+    The TDS protocol always encrypts the login packet, so the password does not
+    cross the network in cleartext even on an otherwise unencrypted session.
+    Whether the *rest* of the session is encrypted is decided by the server:
+    it is only guaranteed when SQL Server has ``ForceEncryption`` enabled.
+
+    What this driver cannot do
+    --------------------------
+
+    ``pymssql`` wraps FreeTDS, which takes its TLS settings from
+    ``freetds.conf`` rather than from ``connect()`` keywords, and it exposes no
+    per-connection CA bundle option. There is therefore no way to request
+    verified TLS from Python here, which is why a configured CA bundle cannot
+    be honoured and is reported as unverified rather than silently ignored.
+
+    Consequently a remote SQL Server connection is treated as encrypted but
+    unverified, and requires the same explicit operator acknowledgement as the
+    other engines. Set ``ForceEncryption`` on the server and a trusted
+    certificate to make the session encryption guaranteed rather than
+    negotiated.
+
+    Args:
+        host: The target host, used to decide whether a plaintext opt-out
+            applies. Omit only when the host is unknown; the connection is then
+            treated as remote and stays encrypted.
+
+    Raises:
+        TlsConfigurationError: Unverified TLS has not been acknowledged.
+    """
+    if plaintext_permitted("SQL Server", host):
+        return {}
+    # A CA bundle cannot be applied through pymssql, so having one configured
+    # does not upgrade this connection to verified. Say so rather than letting
+    # the operator believe the bundle took effect.
+    if ca_bundle():
+        LOG.warning(
+            "SQL Server: %s is set but pymssql cannot apply a CA bundle, so "
+            "the certificate is still NOT verified. Configure FreeTDS directly "
+            "if verified TLS is required.",
+            CA_BUNDLE_ENV,
+        )
+    _unverified_or_raise("SQL Server")
+    return {}
 
 
 def postgres_ssl_kwargs(host: str | None = None) -> dict[str, Any]:

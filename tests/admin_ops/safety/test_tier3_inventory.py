@@ -35,6 +35,7 @@ from src.hooks.tier3_gate import READ_ONLY_TOOLS, requires_approval
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 AGENT_FILES = sorted(REPO_ROOT.glob("deploy/*_agent/agent.py"))
+TOOL_SOURCE_FILES = list(AGENT_FILES)
 
 # Statements and API calls that mutate state, cause disruption, or move data
 # out of the database.
@@ -69,7 +70,7 @@ _VERIFIED_READ_ONLY_DESPITE_KEYWORD = {
 def _tool_bodies() -> dict[str, list[tuple[str, str]]]:
     """Map tool name -> [(agent, source of the decorated function)]."""
     bodies: dict[str, list[tuple[str, str]]] = {}
-    for path in AGENT_FILES:
+    for path in TOOL_SOURCE_FILES:
         source = path.read_text(encoding="utf-8")
         lines = source.splitlines()
         for node in ast.walk(ast.parse(source)):
@@ -102,7 +103,7 @@ def _registered_tools() -> dict[str, set[str]]:
 
 
 def test_agent_sources_are_discoverable():
-    assert len(AGENT_FILES) == 5, [p.parent.name for p in AGENT_FILES]
+    assert len(AGENT_FILES) == 6, [p.parent.name for p in AGENT_FILES]
 
 
 def test_no_allowlisted_tool_performs_a_mutating_operation():
@@ -126,8 +127,7 @@ def test_no_allowlisted_tool_performs_a_mutating_operation():
         "Tools on the read-only allowlist appear to mutate state. Either remove "
         "them from READ_ONLY_TOOLS in src/hooks/tier3_gate.py, or (if the match "
         "is inside a read-only query) document them in "
-        "_VERIFIED_READ_ONLY_DESPITE_KEYWORD after reading the code:\n  "
-        + "\n  ".join(offenders)
+        "_VERIFIED_READ_ONLY_DESPITE_KEYWORD after reading the code:\n  " + "\n  ".join(offenders)
     )
 
 

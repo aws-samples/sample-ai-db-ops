@@ -27,3 +27,11 @@ ui/tsconfig.tsbuildinfo
 # kept outside the source tree.
 docs/demo/
 *.pptx
+
+# Shared src/ staged into an agent dir at deploy time (direct_code_deploy
+# bundles only the agent directory). Generated, never edited in place.
+deploy/*/src/
+
+# Staged by deploy/*_agent/deploy.sh for direct_code_deploy; removed on exit.
+deploy/*_agent/src/
+deploy/oracle_agent/certs/

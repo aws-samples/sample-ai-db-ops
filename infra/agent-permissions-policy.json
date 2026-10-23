@@ -1,6 +1,6 @@
 {
   "Version": "2012-10-17",
-  "Comment": "Least-privilege policy for the DB Ops agent. Replace the 123456789012 account id, us-east-1 region, and the dbops-* resource-name prefixes with the values for your deployment before use.",
+  "Comment": "Least-privilege policy for the DB Ops agent. Replace the 123456789012 account id, us-east-1 region, and the dbops-* resource-name prefixes with the values for your deployment before use. Replace the two kms key ARNs in DecryptDbOpsSecrets with the DbOpsKmsKey ARN from infra/cloudformation.yaml and the SecretKmsKeyArn output of infra/sqlserver-ec2.yaml.",
   "Statement": [
     {
       "Sid": "ReadDbOpsSecrets",
@@ -12,6 +12,20 @@
       "Resource": [
         "arn:aws:secretsmanager:us-east-1:123456789012:secret:dbops/*"
       ]
+    },
+    {
+      "Sid": "DecryptDbOpsSecrets",
+      "Effect": "Allow",
+      "Action": "kms:Decrypt",
+      "Resource": [
+        "arn:aws:kms:us-east-1:123456789012:key/1234abcd-12ab-34cd-56ef-1234567890ab",
+        "arn:aws:kms:us-east-1:123456789012:key/abcd1234-ab12-cd34-ef56-abcdef123456"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "kms:ViaService": "secretsmanager.us-east-1.amazonaws.com"
+        }
+      }
     },
     {
       "Sid": "RdsReadOnly",

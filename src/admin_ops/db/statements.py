@@ -98,6 +98,17 @@ def oracle_kill_session(sid: object, serial: object) -> str:
     )
 
 
+def mssql_kill(session_id: object) -> str:
+    """Return a SQL Server ``KILL`` statement for a validated session id.
+
+    SQL Server does not accept a placeholder for the SPID in ``KILL``, so the
+    value is validated to a bounded positive integer first. Because
+    :func:`_session_id` returns an ``int``, the interpolated text can only ever
+    be digits and cannot terminate the statement or begin a comment.
+    """
+    return f"KILL {_session_id(session_id, name='session_id')}"
+
+
 def mysql_create_index(
     index_name: str,
     table_name: str,

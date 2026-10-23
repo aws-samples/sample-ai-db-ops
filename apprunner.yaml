@@ -1,6 +1,12 @@
 # AWS App Runner config for the Agentic DB Ops demo container.
 # Used when App Runner builds from source; for an image-based service the same
 # runtime env is set on the service instead. Port + env mirror the Dockerfile.
+#
+# ADMIN_DEV_BYPASS is deliberately not set: it makes every signed-in user an
+# admin. For a single-user demo on the seeded data only, add
+#   - name: ADMIN_DEV_BYPASS
+#     value: "1"
+# under run.env, and remove it before anyone else can reach the service.
 version: 1.0
 runtime: docker
 build:
@@ -16,8 +22,6 @@ run:
       value: "3001"
     - name: NODE_ENV
       value: "production"
-    - name: ADMIN_DEV_BYPASS
-      value: "1"
     - name: PYTHON_BIN
       value: "/app/.venv/bin/python3"
     - name: ADMIN_OPS_CONFIG_PATH

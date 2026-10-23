@@ -1,0 +1,370 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  SQL Server 2022 Developer Edition on EC2 Linux for AI-DB-OPS agent testing.
+  Developer Edition is licence-free for non-production use and exposes the full
+  Enterprise DMV surface, so the agent's diagnostic tools behave as they would
+  against a licensed Standard or Enterprise instance.
+
+  The SA password is generated on the instance and written to Secrets Manager by
+  the instance itself. It is never passed as a stack parameter, so it does not
+  appear in the template, the stack events, or any operator's terminal.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC shared with the AgentCore runtimes.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: >-
+      Subnet with outbound HTTPS for package download and SSM. Use a private
+      subnet that routes through a NAT gateway.
+  AssociatePublicIp:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Give the instance a public IP. Leave 'false' and use a NAT gateway. Set
+      'true' only for a throwaway test in a public subnet with no NAT; inbound
+      stays closed by the security group either way.
+  AgentSecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: AgentCore runtime security groups permitted to reach port 1433.
+  InstanceType:
+    Type: String
+    Default: t3.large
+    AllowedValues: [t3.medium, t3.large, t3.xlarge, m5.large, m5.xlarge]
+    Description: >-
+      SQL Server on Linux requires x86_64; Graviton is not supported. t3.large
+      (2 vCPU / 8 GiB) meets the documented 2 GB minimum with headroom.
+  UbuntuAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    Description: Ubuntu 22.04 LTS, one of the distributions SQL Server 2022 supports.
+  SecretName:
+    Type: String
+    Default: dbops/sqlserver/ec2-demo
+    AllowedPattern: '^[A-Za-z0-9/_+=.@-]{1,480}$'
+    Description: Secrets Manager name holding the SQL Server connection JSON.
+  DemoDatabaseName:
+    Type: String
+    Default: DbOpsDemo
+    AllowedPattern: '^[A-Za-z][A-Za-z0-9_]{0,62}$'
+    Description: Demo database created and seeded on first boot.
+
+Conditions:
+  UsePublicIp: !Equals [!Ref AssociatePublicIp, 'true']
+
+Resources:
+  SqlServerSecretKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Customer managed key for the SQL Server connection secret.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          # Delegate to IAM, as for the CMK in infra/cloudformation.yaml. Each
+          # role that reads or writes the secret is granted kms:Decrypt or
+          # kms:GenerateDataKey on this key, through Secrets Manager only.
+          - Sid: EnableIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action:
+              - kms:CancelKeyDeletion
+              - kms:CreateAlias
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DeleteAlias
+              - kms:DescribeKey
+              - kms:DisableKey
+              - kms:DisableKeyRotation
+              - kms:EnableKey
+              - kms:EnableKeyRotation
+              - kms:Encrypt
+              - kms:GenerateDataKey
+              - kms:GetKeyPolicy
+              - kms:GetKeyRotationStatus
+              - kms:ListGrants
+              - kms:ListResourceTags
+              - kms:PutKeyPolicy
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:RetireGrant
+              - kms:RevokeGrant
+              - kms:ScheduleKeyDeletion
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:UpdateAlias
+              - kms:UpdateKeyDescription
+            # In a key policy, "*" means this key only.
+            Resource: '*'
+
+  SqlServerSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref SecretName
+      KmsKeyId: !Ref SqlServerSecretKey
+      Description: >-
+        SQL Server connection details for the AI-DB-OPS SQL Server agent. The
+        instance populates this on first boot.
+      SecretString: '{"status":"pending-instance-bootstrap"}'
+
+  SqlServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SQL Server on EC2 - reachable only from AgentCore runtimes.
+      VpcId: !Ref VpcId
+      # No ingress rules here. Port 1433 is granted only to the AgentCore
+      # security groups below, so the instance is not reachable from the
+      # internet even if AssociatePublicIp is set.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Package repositories, Secrets Manager, and SSM over HTTPS.
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: APT package repositories over HTTP.
+      Tags:
+        - Key: Name
+          Value: dbops-sqlserver-ec2
+        - Key: auto-delete
+          Value: 'no'
+
+  SqlServerIngressFromAgents:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SqlServerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 1433
+      ToPort: 1433
+      SourceSecurityGroupId: !Select [0, !Ref AgentSecurityGroupIds]
+      Description: TDS from the AgentCore runtime security group.
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: SSM management plus write access to this instance's own secret.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: PublishOwnConnectionSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: WriteConnectionSecret
+                Effect: Allow
+                Action: secretsmanager:PutSecretValue
+                Resource: !Ref SqlServerSecret
+              - Sid: EncryptConnectionSecret
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource: !GetAtt SqlServerSecretKey.Arn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  SqlServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref UbuntuAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      Monitoring: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          # Off by default: package downloads go through a NAT gateway. Inbound
+          # stays closed by the security group either way.
+          AssociatePublicIpAddress: !If [UsePublicIp, true, false]
+          SubnetId: !Ref SubnetId
+          GroupSet:
+            - !Ref SqlServerSecurityGroup
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      Tags:
+        - Key: Name
+          Value: dbops-sqlserver-ec2
+        - Key: auto-delete
+          Value: 'no'
+        - Key: Purpose
+          Value: AI-DB-OPS SQL Server agent testing
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # No `set -x`: this script handles the generated SA password, and
+          # command tracing would copy it into the cloud-init log and the EC2
+          # console output, both of which are readable by anyone with
+          # ec2:GetConsoleOutput.
+          set -euo pipefail
+          exec > >(tee /var/log/sqlserver-bootstrap.log) 2>&1
+
+          export DEBIAN_FRONTEND=noninteractive
+
+          # Trust the Microsoft key and register the repositories BEFORE the
+          # first apt-get update. Two ordering constraints apply:
+          #   1. A previously failed run can leave the Microsoft .list files in
+          #      place with no usable key. `apt-get update` then exits 100 and,
+          #      under `set -e`, aborts this script before it installs the key.
+          #   2. The .list files Microsoft serves carry no `signed-by=`, so the
+          #      key must be a dearmored keyring in /etc/apt/trusted.gpg.d and
+          #      must be world-readable, because apt reads it as the _apt user.
+          #      An armoured .asc under /usr/share/keyrings is not consulted.
+          # curl and gpg are both present in the Ubuntu cloud image, so neither
+          # step needs a package install first.
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc -o /tmp/microsoft.asc
+          gpg --dearmor < /tmp/microsoft.asc > /etc/apt/trusted.gpg.d/microsoft-prod.gpg
+          chmod 644 /etc/apt/trusted.gpg.d/microsoft-prod.gpg
+
+          curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/mssql-server-2022.list \
+            -o /etc/apt/sources.list.d/mssql-server-2022.list
+          curl -fsSL https://packages.microsoft.com/config/ubuntu/22.04/prod.list \
+            -o /etc/apt/sources.list.d/msprod.list
+
+          apt-get update -y
+          apt-get install -y curl gnupg apt-transport-https jq unzip
+
+          # AWS CLI v2 for the Secrets Manager write.
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+          unzip -q -o /tmp/awscli.zip -d /tmp && /tmp/aws/install --update
+
+          apt-get install -y mssql-server
+          ACCEPT_EULA=Y apt-get install -y mssql-tools18 unixodbc-dev
+
+          # Generate the SA password on the instance. It is never echoed; the
+          # trailing characters guarantee SQL Server's complexity policy is met.
+          SA_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=')Aa1!"
+
+          MSSQL_SA_PASSWORD="$SA_PASSWORD" MSSQL_PID=Developer \
+            /opt/mssql/bin/mssql-conf -n setup accept-eula
+
+          systemctl enable mssql-server
+          systemctl restart mssql-server
+
+          SQLCMD=/opt/mssql-tools18/bin/sqlcmd
+          ready=no
+          for attempt in $(seq 1 40); do
+            if "$SQLCMD" -S localhost -U sa -P "$SA_PASSWORD" -C -Q "SELECT 1" >/dev/null 2>&1; then
+              ready=yes
+              break
+            fi
+            sleep 10
+          done
+          if [ "$ready" != "yes" ]; then
+            echo "ERROR: SQL Server did not become reachable"
+            tail -30 /var/opt/mssql/log/errorlog || true
+            exit 1
+          fi
+
+          PRIVATE_IP="$(hostname -I | awk '{print $1}')"
+
+          # Publish the credentials as soon as they are known to work, before
+          # any seeding. The password exists only in this script's memory, so a
+          # later seeding failure would otherwise strand a running instance
+          # whose SA password nobody holds, forcing a password reset to recover.
+          aws secretsmanager put-secret-value \
+            --region ${AWS::Region} \
+            --secret-id ${SqlServerSecret} \
+            --secret-string "$(jq -nc \
+              --arg host "$PRIVATE_IP" --arg port "1433" --arg username "sa" \
+              --arg password "$SA_PASSWORD" --arg database "master" \
+              '{host:$host, port:($port|tonumber), username:$username,
+                password:$password, database:$database, engine:"sqlserver"}')"
+
+          # Seed a demo database so the read-only tools return real rows.
+          "$SQLCMD" -S localhost -U sa -P "$SA_PASSWORD" -C -b -Q "
+            IF DB_ID('${DemoDatabaseName}') IS NULL CREATE DATABASE [${DemoDatabaseName}];"
+          "$SQLCMD" -S localhost -U sa -P "$SA_PASSWORD" -C -b -d "${DemoDatabaseName}" -Q "
+            IF OBJECT_ID('dbo.Orders') IS NULL
+            BEGIN
+              CREATE TABLE dbo.Orders (
+                OrderId     INT IDENTITY(1,1) PRIMARY KEY,
+                CustomerId  INT          NOT NULL,
+                Status      VARCHAR(20)  NOT NULL,
+                Amount      DECIMAL(12,2) NOT NULL,
+                CreatedAt   DATETIME2    NOT NULL DEFAULT SYSUTCDATETIME()
+              );
+              WITH n AS (
+                SELECT TOP (50000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS i
+                FROM sys.all_objects a CROSS JOIN sys.all_objects b
+              )
+              INSERT INTO dbo.Orders (CustomerId, Status, Amount)
+              SELECT i % 997,
+                     CASE i % 4 WHEN 0 THEN 'NEW' WHEN 1 THEN 'PAID'
+                                 WHEN 2 THEN 'SHIPPED' ELSE 'CANCELLED' END,
+                     (i % 5000) / 100.0
+              FROM n;
+              CREATE INDEX IX_Orders_CustomerId ON dbo.Orders (CustomerId);
+            END"
+
+          # Enable Query Store so top-SQL tooling has history to read.
+          "$SQLCMD" -S localhost -U sa -P "$SA_PASSWORD" -C -b -Q "
+            ALTER DATABASE [${DemoDatabaseName}] SET QUERY_STORE = ON;
+            ALTER DATABASE [${DemoDatabaseName}]
+              SET QUERY_STORE (OPERATION_MODE = READ_WRITE, DATA_FLUSH_INTERVAL_SECONDS = 60);"
+
+          # Repoint the secret at the demo database now that it exists.
+          SECRET_JSON="$(jq -nc \
+            --arg host "$PRIVATE_IP" \
+            --arg port "1433" \
+            --arg username "sa" \
+            --arg password "$SA_PASSWORD" \
+            --arg database "${DemoDatabaseName}" \
+            '{host:$host, port:($port|tonumber), username:$username,
+              password:$password, database:$database, engine:"sqlserver"}')"
+
+          aws secretsmanager put-secret-value \
+            --region ${AWS::Region} \
+            --secret-id ${SqlServerSecret} \
+            --secret-string "$SECRET_JSON"
+
+          unset SA_PASSWORD SECRET_JSON
+          echo "BOOTSTRAP_COMPLETE host=$PRIVATE_IP db=${DemoDatabaseName}"
+
+Outputs:
+  InstanceId:
+    Description: SQL Server EC2 instance ID.
+    Value: !Ref SqlServerInstance
+  PrivateIp:
+    Description: Private IP the AgentCore runtime connects to.
+    Value: !GetAtt SqlServerInstance.PrivateIp
+  SecretArn:
+    Description: Pass this to the agent as SQLSERVER_SECRET_ARN.
+    Value: !Ref SqlServerSecret
+  SecretKmsKeyArn:
+    Description: >-
+      Customer managed key for the secret. Grant kms:Decrypt on it, through
+      Secrets Manager, to every role that reads the secret.
+    Value: !GetAtt SqlServerSecretKey.Arn
+  SqlServerSecurityGroupId:
+    Description: Security group guarding port 1433.
+    Value: !Ref SqlServerSecurityGroup
+  DemoDatabase:
+    Description: Seeded demo database name.
+    Value: !Ref DemoDatabaseName

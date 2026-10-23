@@ -25,6 +25,20 @@ Parameters:
       default is set so a value must be supplied explicitly.
     MinLength: 8
 
+  EnableDeletionProtection:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Deletion protection on every Aurora cluster and RDS instance. Keep 'true'.
+      To tear the stack down, update it with 'false' first, then delete it.
+
+  FlowLogRetentionDays:
+    Type: Number
+    Default: 365
+    AllowedValues: [365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+    Description: Retention for the VPC Flow Logs log group, in days.
+
 Resources:
 
   # ═══════════════════════════════════════════════════════════════════════════════
@@ -75,6 +89,22 @@ Resources:
             # In a KMS key policy, "*" means only the key to which this
             # policy is attached; key policies require this resource value.
             Resource: "*"
+          - Sid: AllowCloudWatchLogsForVpcFlowLogs
+            Effect: Allow
+            Principal:
+              Service: !Sub logs.${AWS::Region}.amazonaws.com
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:GenerateDataKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:DescribeKey
+            Resource: "*"
+            Condition:
+              ArnEquals:
+                kms:EncryptionContext:aws:logs:arn: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/vpc/${EnvironmentName}/flow-logs
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # IAM role for RDS Enhanced Monitoring (CKV_AWS_118)
@@ -107,6 +137,68 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${EnvironmentName}-vpc
+
+  # VPC Flow Logs (all traffic) to an encrypted CloudWatch Logs log group
+  VpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /vpc/${EnvironmentName}/flow-logs
+      RetentionInDays: !Ref FlowLogRetentionDays
+      KmsKeyId: !GetAtt DbOpsKmsKey.Arn
+
+  VpcFlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Lets VPC Flow Logs deliver to the one flow-log log group.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*
+
+  VpcFlowLogDeliveryPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Deliver VPC Flow Logs to the flow-log log group only.
+      Roles:
+        - !Ref VpcFlowLogRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: WriteFlowLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:DescribeLogStreams
+            Resource:
+              - !GetAtt VpcFlowLogGroup.Arn
+              - !Sub ${VpcFlowLogGroup.Arn}:log-stream:*
+          - Sid: DescribeLogGroups
+            Effect: Allow
+            Action: logs:DescribeLogGroups
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*
+
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    DependsOn: VpcFlowLogDeliveryPolicy
+    Properties:
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref VpcFlowLogGroup
+      DeliverLogsPermissionArn: !GetAtt VpcFlowLogRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-vpc-flow-log
 
   # Private subnets (databases + AgentCore agents live here)
   PrivateSubnet1:
@@ -346,7 +438,7 @@ Resources:
         - !Ref DatabaseSecurityGroup
       EnableIAMDatabaseAuthentication: true
       StorageEncrypted: true
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       BackupRetentionPeriod: 1
       Tags:
         - Key: Name
@@ -396,7 +488,7 @@ Resources:
         - !Ref DatabaseSecurityGroup
       EnableIAMDatabaseAuthentication: true
       StorageEncrypted: true
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       BackupRetentionPeriod: 1
       Tags:
         - Key: Name
@@ -450,7 +542,7 @@ Resources:
       MonitoringInterval: 60
       MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
       BackupRetentionPeriod: 1
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       StorageEncrypted: true
       Tags:
         - Key: Name
@@ -482,7 +574,7 @@ Resources:
       MonitoringInterval: 60
       MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
       BackupRetentionPeriod: 1
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       StorageEncrypted: true
       Tags:
         - Key: Name
@@ -542,7 +634,7 @@ Resources:
         - !Ref DatabaseSecurityGroup
       EnableIAMDatabaseAuthentication: true
       StorageEncrypted: true
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       BackupRetentionPeriod: 1
       Tags:
         - Key: Name
@@ -580,7 +672,7 @@ Resources:
         - !Ref DatabaseSecurityGroup
       EnableIAMDatabaseAuthentication: true
       StorageEncrypted: true
-      DeletionProtection: false
+      DeletionProtection: !Ref EnableDeletionProtection
       BackupRetentionPeriod: 1
       Tags:
         - Key: Name

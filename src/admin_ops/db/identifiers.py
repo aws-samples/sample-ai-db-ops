@@ -85,6 +85,16 @@ def quote_oracle(name: str, *, kind: str = "identifier") -> str:
     return '"' + validate_identifier(name, kind=kind).upper() + '"'
 
 
+def quote_mssql(name: str, *, kind: str = "identifier") -> str:
+    """Validate then bracket-quote a SQL Server identifier.
+
+    ``validate_identifier`` already rejects ``]``, so the closing bracket
+    cannot be terminated early. Case is preserved because SQL Server
+    identifiers are case-sensitive under a case-sensitive collation.
+    """
+    return "[" + validate_identifier(name, kind=kind) + "]"
+
+
 def validate_masking_type(masking_type: str) -> str:
     """Validate a data-masking strategy against the fixed allowlist."""
     if masking_type not in _ALLOWED_MASKING_TYPES:
