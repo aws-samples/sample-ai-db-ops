@@ -30,16 +30,16 @@ This repo is configured for AWS account **`123456789012`** (`us-east-1`). All ac
 │  │  31 tools      │ │  24 tools      │ │  ~25 tools     │       │
 │  │  Strands Agent │ │  Strands Agent │ │  Strands Agent │       │
 │  └────────┬───────┘ └────────┬───────┘ └────────┬───────┘       │
-│  ┌────────▼───────┐ ┌────────▼───────┐ ┌────────▼───────┐       │
-│  │dbops_sqlserver │ │ dbops_dynamodb │ │  dbops_devops  │       │
-│  │  26 tools      │ │  17 tools      │ │  (orchestrator)│       │
-│  │  Strands Agent │ │  Strands Agent │ │  Strands Agent │       │
-│  └────────┬───────┘ └────────┬───────┘ └────────┬───────┘       │
+│  ┌────────▼───────┐ ┌────────▼───────┐          │               │
+│  │dbops_sqlserver │ │ dbops_dynamodb │          │               │
+│  │  26 tools      │ │  17 tools      │          │               │
+│  │  Strands Agent │ │  Strands Agent │          │               │
+│  └────────┬───────┘ └────────┬───────┘          │               │
 │           │                  │                  │               │
 │  ┌────────▼──────────────────▼──────────────────▼─────────────┐ │
 │  │              Existing VPC (vpc-0xxxxxxxxxxxxxxxx)          │ │
 │  │  VPC Endpoints: Secrets Manager, DynamoDB, Bedrock,        │ │
-│  │                 CloudWatch Logs, Monitoring, STS, RDS, S3  │ │
+│  │                 CloudWatch Logs, Monitoring, STS, RDS      │ │
 │  └────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                            │
@@ -55,9 +55,10 @@ This repo is configured for AWS account **`123456789012`** (`us-east-1`). All ac
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-The **S3 gateway endpoint** is required, not optional. AgentCore runtimes
-deployed with `direct_code_deploy` fetch their code bundle from S3, and a VPC
-without an S3 endpoint or a NAT gateway gives the runtime no path to it. The
+AgentCore runtimes deployed with `direct_code_deploy` fetch their code bundle
+from S3, so the agent subnets need a path to S3: the NAT gateway that
+`infra/cloudformation.yaml` creates, or an S3 gateway endpoint if you use an
+existing VPC without one. The
 symptom is a runtime that reports `READY` but fails every invocation with
 `Runtime initialization time exceeded` and an empty log stream, because the
 container never binds its port. Gateway endpoints are free.
@@ -94,39 +95,7 @@ aws cloudformation describe-stacks --stack-name dbops \
   --query 'Stacks[0].Outputs' --output table
 ```
 
-### 2. Deploy Cognito authentication
-
-`infra/cognito-auth.yaml` creates an administrator-provisioned Cognito user pool,
-a public application client, and a managed-login domain. The client supports only
-the OAuth 2.0 Authorization Code flow. The application generates PKCE S256,
-state, and nonce values server-side and stores only signed HttpOnly cookies.
-It never stores Cognito access or refresh tokens and never trusts a browser
-identity header.
-
-Choose a globally unique domain prefix, then deploy the stack only after reviewing
-the target account and change set:
-
-```bash
-aws cloudformation deploy \
-  --stack-name dbops-cognito-auth \
-  --template-file infra/cognito-auth.yaml \
-  --parameter-overrides \
-      AppBaseUrl=https://your-app.example.com \
-      CognitoDomainPrefix=<globally-unique-prefix>
-```
-
-Use the stack outputs for `COGNITO_USER_POOL_ID`, `COGNITO_CLIENT_ID`, and
-`COGNITO_DOMAIN`. Store a randomly generated `AUTH_SESSION_SECRET` of at least
-32 bytes in Secrets Manager and attach it to App Runner as a runtime secret.
-Do not put the secret in `apprunner.yaml`, a Docker build argument, an image
-`ENV`, or any `NEXT_PUBLIC_*` variable.
-
-Self-sign-up is disabled and MFA is required. Create administrators out of band,
-complete their first-login password and TOTP enrollment, then write their
-immutable Cognito `sub` (not email or username) to the `dbops-admins` table.
-Authentication alone does not grant the application admin role.
-
-### 3. Deploy agents to AgentCore
+### 2. Deploy agents to AgentCore
 
 ```bash
 export AWS_REGION=us-east-1
@@ -141,39 +110,13 @@ export DYNAMODB_TABLE="dbops-orders"
 # Optional, only if you have a MySQL cluster:
 # export MYSQL_SECRET_ARN="<your-mysql-secret-arn>"
 
-# Explicitly opt in to protected DynamoDB session and vector memory.
-export ENABLE_DYNAMODB_MEMORY=1
-export DYNAMODB_AGENT_EXECUTION_ROLE_NAME="<existing DynamoDB AgentCore execution role>"
-# Optional overrides:
-# export DYNAMODB_MEMORY_STACK_NAME=dbops-dynamodb-vector-memory
-# export DYNAMODB_MEMORY_SCOPE=dbops-demo
-# export DYNAMODB_MEMORY_RETENTION_DAYS=30
-
-# Review the exact commands without contacting AWS or changing local state.
-DRY_RUN=1 ./deploy_all.sh dynamodb
-
-# Validate the caller account, template, and execution role using read-only APIs.
-PREFLIGHT_ONLY=1 ./deploy_all.sh dynamodb
-
-# Only after reviewing the plan, permit CloudFormation, vector-index, IAM-policy,
-# and AgentCore runtime changes.
-CONFIRM_AWS_MUTATIONS=YES ./deploy_all.sh dynamodb
+./deploy_all.sh                    # deploys all four engines
+# or, deploy only what you have credentials for:
+./deploy_all.sh postgresql oracle dynamodb
 ```
 
-The memory stack enables deletion protection, point-in-time recovery, encryption,
-and a retain policy. The deployment script reads the table and index names from
-stack outputs, creates or validates the DynamoDB vector index, binds the same
-execution-role ARN to AgentCore, and then injects the memory configuration into
-only the DynamoDB runtime. It does not add DynamoDB permissions to the UI or App
-Runner role.
-
-Production uses Amazon Cognito managed login with Authorization Code + PKCE.
-Every page requires a signed HttpOnly application session, and API routes derive
-the principal exclusively from the verified session's immutable Cognito `sub`.
-Unsafe authenticated requests must carry an `Origin` exactly equal to
-`APP_BASE_URL`. Configure the callback and logout URLs from the same exact origin;
-do not derive redirects from the request `Host` header. The public
-`/api/health` route exists only for the App Runner health probe.
+The SQL Server agent and the read-only runtimes have their own deploy scripts,
+described next.
 
 #### SQL Server on EC2
 
@@ -225,6 +168,9 @@ export EXPECTED_AWS_ACCOUNT_ID=123456789012
 export SQLSERVER_SECRET_ARN="<SecretArn output>"
 export SQLSERVER_EC2_INSTANCE_ID="<InstanceId output>"
 export AGENTCORE_CLI="$(pwd)/.venv/bin/agentcore"
+# Required, and must be true: pymssql cannot verify the server certificate
+# (see "Encryption in transit" under the SQL Server agent below).
+export DB_TLS_ALLOW_UNVERIFIED=true
 
 # Review the plan first; it prints the resolved account and arguments.
 ./deploy/sqlserver_agent/deploy.sh
@@ -268,7 +214,8 @@ aws cloudformation deploy --stack-name dbops-readonly-specialist-roles \
 # Configure each agent once with `agentcore configure -n <name>_readonly -er <role ARN> ...`,
 # then deploy:
 cd deploy/sqlserver_agent
-AGENT_NAME=dbops_sqlserver_readonly DBOPS_READ_ONLY_MODE=true bash deploy.sh
+AGENT_NAME=dbops_sqlserver_readonly DBOPS_READ_ONLY_MODE=true \
+  DB_TLS_ALLOW_UNVERIFIED=true bash deploy.sh
 cd ../oracle_agent
 AGENT_NAME=dbops_oracle_readonly DBOPS_READ_ONLY_MODE=true \
   ORACLE_DB_INSTANCE_IDENTIFIER=<id> bash deploy.sh
@@ -289,7 +236,7 @@ agentcore status -n dbops_sqlserver
 agentcore status -n dbops_dynamodb
 ```
 
-### 4. Configure and start the UI
+### 3. Configure and start the UI
 
 ```bash
 cd ui
@@ -301,7 +248,7 @@ npm run dev
 # UI runs at http://localhost:3001
 ```
 
-### 5. Run E2E tests (optional)
+### 4. Run E2E tests (optional)
 
 ```bash
 bash tests/e2e_test.sh
@@ -313,11 +260,7 @@ bash tests/e2e_test.sh
 |---|---|---|
 | `AWS_REGION` | UI + agents | AWS region (default `us-east-1`) |
 | `AWS_ACCOUNT_ID` | UI | Used to derive default S3 upload bucket |
-| `APP_BASE_URL` | UI | Exact application origin used for callback, logout, and origin validation |
-| `COGNITO_USER_POOL_ID` | UI | Cognito user pool that issues ID tokens |
-| `COGNITO_CLIENT_ID` | UI | Public Cognito OAuth client ID (no client secret) |
-| `COGNITO_DOMAIN` | UI | HTTPS Cognito managed-login domain origin |
-| `AUTH_SESSION_SECRET` | UI secret | At least 32 random bytes; App Runner runtime secret for signed cookies |
+| `NEXT_PUBLIC_USER_ID` | UI | Identity attached to chat + audit log (default `dbops-user`). Not authentication: see *Before production* |
 | `PYTHON_BIN` | UI | Path to Python interpreter for `/api/invoke` (default `python3.12`) |
 | `POSTGRESQL_AGENT_ARN` | UI | AgentCore runtime ARN |
 | `MYSQL_AGENT_ARN` | UI | AgentCore runtime ARN |
@@ -559,7 +502,11 @@ This is sample code. Beyond the review your organization requires, at minimum:
   the secrets but no rotation schedule, because rotation needs a rotation function
   that can reach each database inside the private VPC.
 - Replace the SQL Server `sa` login with a dedicated least-privilege login for the
-  agents.
+  agents, and enable `ForceEncryption` with a trusted certificate.
+- Put the UI behind an authenticating proxy (for example an Application Load
+  Balancer with OIDC, or Amazon Cognito) that sets the caller identity server-side.
+  The API routes read the caller from the `x-user-id` header, which a browser can
+  set to any value, so the header alone is not authentication.
 - Keep `EnableDeletionProtection=true` and leave `ADMIN_DEV_BYPASS` unset.
 
 ## Clean up

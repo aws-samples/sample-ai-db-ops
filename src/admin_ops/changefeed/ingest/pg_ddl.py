@@ -48,6 +48,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from src.admin_ops.changefeed.change_event import ChangeEvent, make_event_id
+from src.admin_ops.errors import redact
 from src.admin_ops.changefeed import store
 
 LOG = logging.getLogger(__name__)
@@ -173,7 +174,10 @@ def _event_from_record(
     obj = parsed["object"]
     verb = parsed["verb"]
     resource_id = f"pg_ddl:{db_identifier}:{obj}"[:256]
-    sql_preview = parsed["sql"][:300]
+    # DDL such as CREATE ROLE ... PASSWORD '...' can carry credentials, and the
+    # summary is persisted and shown in the UI, so strip quoted literals and
+    # key=value secrets before storing a preview.
+    sql_preview = redact(parsed["sql"], max_len=300)
     summary = f"{verb} on {obj} ({db_identifier}): {sql_preview}"[:512]
 
     # CloudWatch Logs Insights deep-link is derived at the UI layer from

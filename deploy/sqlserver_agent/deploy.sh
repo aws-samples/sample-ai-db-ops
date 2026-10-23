@@ -28,6 +28,14 @@ set -euo pipefail
 # true for runtimes that serve automated callers (AWS DevOps Agent): only the
 # read-only tools are registered. Leave false for the interactive UI runtime.
 : "${DBOPS_READ_ONLY_MODE:=false}"
+# pymssql cannot verify the server certificate, so the connection is encrypted
+# but unverified. Make the deployer acknowledge that rather than defaulting it.
+if [[ "${DB_TLS_ALLOW_UNVERIFIED:-}" != "true" ]]; then
+  echo "Set DB_TLS_ALLOW_UNVERIFIED=true to acknowledge that the SQL Server" >&2
+  echo "connection is encrypted but its certificate is not verified (pymssql" >&2
+  echo "has no CA bundle option). See README: SQL Server agent, Encryption in transit." >&2
+  exit 2
+fi
 if [[ "$DBOPS_READ_ONLY_MODE" != "true" && "$DBOPS_READ_ONLY_MODE" != "false" ]]; then
   echo "DBOPS_READ_ONLY_MODE must be true or false" >&2
   exit 2
@@ -71,4 +79,4 @@ AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$A2A_REGION" "$AGENTCORE_CLI" deploy \
   --env "SQLSERVER_SECRET_ARN=$SQLSERVER_SECRET_ARN" \
   --env "SQLSERVER_EC2_INSTANCE_ID=$SQLSERVER_EC2_INSTANCE_ID" \
   --env "DBOPS_READ_ONLY_MODE=$DBOPS_READ_ONLY_MODE" \
-  --env "DB_TLS_ALLOW_UNVERIFIED=${DB_TLS_ALLOW_UNVERIFIED:-true}"
+  --env "DB_TLS_ALLOW_UNVERIFIED=$DB_TLS_ALLOW_UNVERIFIED"

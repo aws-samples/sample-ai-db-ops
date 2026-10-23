@@ -116,3 +116,21 @@ def test_handler_idempotent_on_replay():
 def test_db_identifier_from_log_group():
     assert pg_ddl._db_from_log_group("/aws/rds/cluster/my-cluster/postgresql") == "my-cluster"
     assert pg_ddl._db_from_log_group("weird") == "database-test"
+
+
+def test_ddl_preview_redacts_credentials():
+    store_mod.set_backend_for_testing(InMemoryChangeFeedBackend())
+    payload = {
+        "logGroup": "/aws/rds/cluster/database-test/postgresql",
+        "logStream": "database-test-instance-1",
+        "logEvents": [
+            {
+                "timestamp": 1780000001000,
+                "message": _log("ALTER ROLE app_user WITH PASSWORD 'Sup3rSecret!';"),
+            },
+        ],
+    }
+    assert pg_ddl.handle_cloudwatch_logs_event(payload)["events_written"] == 1
+    (event,) = query(ChangeFeedFilter(sources=["database"]), page=1, page_size=10)["events"]
+    assert "Sup3rSecret" not in event.summary
+    assert "[redacted]" in event.summary
