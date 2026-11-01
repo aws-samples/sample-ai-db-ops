@@ -1,5 +1,5 @@
 # Direct dependencies for the DynamoDB AgentCore runtime.
-strands-agents==1.47.0
+strands-agents==1.48.0
 # bedrock-agentcore 1.19.0: 1.18.0 is affected by CVE-2026-16796
 # (argument injection in install_packages()).
 bedrock-agentcore==1.19.0
